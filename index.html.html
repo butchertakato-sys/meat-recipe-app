@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>食肉加工 配合・製造管理アプリ Ver3</title>
+  <style>
+    :root {
+      --bg: #f7f4ef;
+      --card: #ffffff;
+      --text: #222;
+      --muted: #666;
+      --accent: #8b2f2f;
+      --accent2: #f1dfd7;
+      --border: #ddd;
+      --good: #276749;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      background: var(--accent);
+      color: #fff;
+      padding: 14px 16px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.18);
+    }
+    header h1 { margin: 0; font-size: 20px; }
+    header p { margin: 3px 0 0; font-size: 12px; opacity: .9; }
+    main { max-width: 900px; margin: 0 auto; padding: 16px; }
+    .section { display: none; }
+    .section.active { display: block; }
+    .grid { display: grid; gap: 14px; }
+    @media (min-width: 700px) { .menu-grid { grid-template-columns: repeat(2, 1fr); } }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.05);
+    }
+    .menu-button, button, select, input {
+      width: 100%;
+      min-height: 52px;
+      font-size: 18px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      padding: 10px 12px;
+      background: #fff;
+    }
+    .menu-button, button {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      font-weight: 700;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+    .secondary { background: #555; }
+    .ghost { background: #fff; color: var(--accent); border: 2px solid var(--accent); }
+    .disabled { background: #aaa; color: #fff; }
+    label { display: block; font-weight: 700; margin: 14px 0 6px; }
+    .row { display: grid; grid-template-columns: 1fr; gap: 12px; }
+    @media (min-width: 700px) { .row.two { grid-template-columns: 1fr 1fr; } }
+    .result {
+      margin-top: 16px;
+      background: #fff;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
+    .result h3 { margin: 0; padding: 12px 14px; background: var(--accent2); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 12px; border-top: 1px solid var(--border); text-align: left; }
+    td:last-child, th:last-child { text-align: right; font-weight: 700; }
+    .note { color: var(--muted); font-size: 14px; margin-top: 8px; }
+    .pill { display:inline-block; padding:4px 10px; border-radius:999px; background:var(--accent2); color:var(--accent); font-weight:700; font-size:13px; }
+    .copyBox {
+      width: 100%;
+      min-height: 180px;
+      margin-top: 12px;
+      font-size: 16px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      padding: 12px;
+      white-space: pre-wrap;
+    }
+    .topbar { display:flex; gap:10px; align-items:center; margin-bottom:14px; }
+    .topbar button { width:auto; min-height:44px; font-size:16px; padding:8px 14px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>食肉加工 配合・製造管理アプリ Ver3</h1>
+    <p>製品レシピ・乳化生地・熟成管理 / iPhone・iPad・Windows対応</p>
+  </header>
+
+  <main>
+    <section id="home" class="section active">
+      <div class="grid menu-grid">
+        <div class="card">
+          <h2>製品レシピ計算</h2>
+          <p class="note">ソーセージ4種の配合を計算します。</p>
+          <button class="menu-button" onclick="showSection('product')">開く</button>
+        </div>
+        <div class="card">
+          <h2>乳化生地計算</h2>
+          <p class="note">ソーセージ生地の元になる乳化生地を計算します。</p>
+          <button class="menu-button" onclick="showSection('emulsion')">開く</button>
+        </div>
+        <div class="card">
+          <h2>熟成管理</h2>
+          <p class="note">ベーコン7日、生ハム12か月/18か月の予定日を計算します。</p>
+          <button class="menu-button" onclick="showSection('aging')">開く</button>
+        </div>
+        <div class="card">
+          <h2>製造記録</h2>
+          <p class="note">製造日、ロット、歩留まり、加熱温度などを将来追加予定。</p>
+          <button class="menu-button disabled" onclick="alert('将来実装予定です')">将来実装</button>
+        </div>
+        <div class="card">
+          <h2>履歴一覧</h2>
+          <p class="note">製造履歴保存、検索、CSV/Excel出力を将来追加予定。</p>
+          <button class="menu-button disabled" onclick="alert('将来実装予定です')">将来実装</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="product" class="section">
+      <div class="topbar"><button class="secondary" onclick="showSection('home')">← トップへ</button><span class="pill">製品レシピ計算</span></div>
+      <div class="card">
+        <label>レシピ</label>
+        <select id="productRecipe" onchange="renderProductInputs(); calcProduct();"></select>
+        <label>肉重量(g)</label>
+        <input id="meatWeight" type="number" inputmode="decimal" placeholder="例：3000" oninput="calcProduct()" />
+        <label>乳化生地モード</label>
+        <select id="emulsionMode" onchange="renderProductInputs(); calcProduct();">
+          <option value="auto">乳化生地自動計算</option>
+          <option value="manual">乳化生地手入力</option>
+        </select>
+        <div id="manualEmulsionWrap"></div>
+        <div id="productResult" class="result"></div>
+        <button class="ghost" onclick="copyCurrent('product')">GoodNotes転記用コピー</button>
+      </div>
+    </section>
+
+    <section id="emulsion" class="section">
+      <div class="topbar"><button class="secondary" onclick="showSection('home')">← トップへ</button><span class="pill">乳化生地計算</span></div>
+      <div class="card">
+        <label>乳化生地タイプ</label>
+        <select id="emulsionType" onchange="renderEmulsionInputs(); calcEmulsion();">
+          <option value="porkOnly">豚肉のみ</option>
+          <option value="porkFatMix">豚肉＋豚脂</option>
+        </select>
+        <div id="emulsionInputs"></div>
+        <div id="emulsionResult" class="result"></div>
+        <button class="ghost" onclick="copyCurrent('emulsion')">GoodNotes転記用コピー</button>
+      </div>
+    </section>
+
+    <section id="aging" class="section">
+      <div class="topbar"><button class="secondary" onclick="showSection('home')">← トップへ</button><span class="pill">熟成管理</span></div>
+      <div class="card">
+        <label>管理項目</label>
+        <select id="agingType" onchange="renderAgingInputs(); calcAging();">
+          <option value="bacon">ベーコン</option>
+          <option value="prosciutto">生ハム</option>
+        </select>
+        <div id="agingInputs"></div>
+        <div id="agingResult" class="result"></div>
+        <button class="ghost" onclick="copyCurrent('aging')">GoodNotes転記用コピー</button>
+      </div>
+    </section>
+  </main>
+
+<script>
+const recipes = {
+  arabiki: {
+    name: 'あらびき', waterRate: 0.2, emulsionAutoRate: 0.2,
+    items: [
+      { name:'水', calc: c => c.meat * 0.2 },
+      { name:'乳化生地', calc: c => c.emulsion },
+      { name:'塩', calc: c => (c.meat + c.water) * 0.016 },
+      { name:'ウインナーヘラマント', calc: c => (c.meat + c.water + c.emulsion) * 0.005 },
+      { name:'ヘラビンE', calc: c => (c.meat + c.water) * 0.003 },
+      { name:'ペルビナールHH', calc: c => (c.meat + c.water) * 0.001 },
+    ]
+  },
+  cheese: {
+    name: 'チーズ', waterRate: 0.2, emulsionAutoRate: 0.2,
+    items: [
+      { name:'水', calc: c => c.meat * 0.2 },
+      { name:'乳化生地', calc: c => c.emulsion },
+      { name:'塩', calc: c => (c.meat + c.water) * 0.016 },
+      { name:'ウインナーヘラマント', calc: c => (c.meat + c.water + c.emulsion) * 0.005 },
+      { name:'ヘラビンE', calc: c => (c.meat + c.water) * 0.003 },
+      { name:'ペルビナールHH', calc: c => (c.meat + c.water) * 0.001 },
+      { name:'チーズ', calc: c => (c.meat + c.water + c.emulsion) * 0.10 },
+    ]
+  },
+  herb: {
+    name: 'ハーブ', waterRate: 0.2, emulsionAutoRate: 0.2,
+    items: [
+      { name:'水', calc: c => c.meat * 0.2 },
+      { name:'乳化生地', calc: c => c.emulsion },
+      { name:'塩', calc: c => (c.meat + c.water) * 0.016 },
+      { name:'ブラートブルストD', calc: c => (c.meat + c.water + c.emulsion) * 0.005 },
+      { name:'ヘラビンE', calc: c => (c.meat + c.water) * 0.003 },
+      { name:'ペルビナールHH', calc: c => (c.meat + c.water) * 0.001 },
+      { name:'マジョラム', calc: c => (c.meat + c.water + c.emulsion) * 0.001 },
+      { name:'バジル', calc: c => (c.meat + c.water + c.emulsion) * 0.0005 },
+      { name:'オレガノ', calc: c => (c.meat + c.water + c.emulsion) * 0.0005 },
+    ]
+  },
+  chorizo: {
+    name: 'チョリソー', waterRate: 0.2, emulsionAutoRate: 0.2,
+    items: [
+      { name:'水', calc: c => c.meat * 0.2 },
+      { name:'乳化生地', calc: c => c.emulsion },
+      { name:'塩', calc: c => (c.meat + c.water) * 0.016 },
+      { name:'ヘラビンE', calc: c => (c.meat + c.water) * 0.003 },
+      { name:'ペルビナールHH', calc: c => (c.meat + c.water) * 0.001 },
+      { name:'チョリソースパイス', calc: c => (c.meat + c.water + c.emulsion) * 0.012 },
+      { name:'唐辛子', calc: c => (c.meat + c.water + c.emulsion) * 0.002 },
+    ]
+  }
+};
+
+let lastCopyText = '';
+
+function round1(n){ return Math.round((Number(n)||0) * 10) / 10; }
+function fmt(n){ return round1(n).toLocaleString('ja-JP', { maximumFractionDigits: 1 }); }
+function todayStr(){ return new Date().toISOString().slice(0,10); }
+function addDays(dateStr, days){ const d = new Date(dateStr); d.setDate(d.getDate()+days); return d.toISOString().slice(0,10); }
+function addMonths(dateStr, months){ const d = new Date(dateStr); d.setMonth(d.getMonth()+months); return d.toISOString().slice(0,10); }
+function tableHtml(title, rows){
+  return `<h3>${title}</h3><table><tbody>${rows.map(r=>`<tr><th>${r[0]}</th><td>${r[1]}</td></tr>`).join('')}</tbody></table>`;
+}
+function showSection(id){
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+
+function init(){
+  const sel = document.getElementById('productRecipe');
+  Object.entries(recipes).forEach(([key, r]) => {
+    const o = document.createElement('option'); o.value = key; o.textContent = r.name; sel.appendChild(o);
+  });
+  renderProductInputs(); renderEmulsionInputs(); renderAgingInputs();
+}
+
+function renderProductInputs(){
+  const mode = document.getElementById('emulsionMode').value;
+  const wrap = document.getElementById('manualEmulsionWrap');
+  wrap.innerHTML = mode === 'manual'
+    ? `<label>乳化生地重量(g)</label><input id="manualEmulsion" type="number" inputmode="decimal" placeholder="例：800" oninput="calcProduct()" />`
+    : `<p class="note">乳化生地は（肉重量＋水）×0.2で自動計算します。</p>`;
+}
+
+function calcProduct(){
+  const key = document.getElementById('productRecipe').value;
+  const recipe = recipes[key];
+  const meat = Number(document.getElementById('meatWeight').value) || 0;
+  const water = meat * recipe.waterRate;
+  const mode = document.getElementById('emulsionMode').value;
+  const emulsion = mode === 'manual' ? (Number(document.getElementById('manualEmulsion')?.value) || 0) : (meat + water) * recipe.emulsionAutoRate;
+  if(!meat){ document.getElementById('productResult').innerHTML = `<h3>計算結果</h3><p class="note" style="padding:12px;">肉重量を入力してください。</p>`; return; }
+  const ctx = { meat, water, emulsion };
+  const rows = recipe.items.map(item => [item.name, `${fmt(item.calc(ctx))} g`]);
+  const totalBase = meat + water + emulsion;
+  rows.push(['肉＋水＋乳化生地', `${fmt(totalBase)} g`]);
+  document.getElementById('productResult').innerHTML = tableHtml(`${recipe.name} 配合`, rows);
+  lastCopyText = `【製品レシピ計算】\nレシピ：${recipe.name}\n肉重量：${fmt(meat)}g\n乳化生地モード：${mode==='auto'?'自動計算':'手入力'}\n` + rows.map(r=>`${r[0]}：${r[1]}`).join('\n');
+}
+
+function renderEmulsionInputs(){
+  const type = document.getElementById('emulsionType').value;
+  const html = type === 'porkOnly'
+    ? `<label>肉重量(g)</label><input id="emulsionWeight" type="number" inputmode="decimal" placeholder="例：3000" oninput="calcEmulsion()" /><p class="note">豚脂・氷は肉重量の3分の1で計算します。</p>`
+    : `<label>豚肉＋豚脂重量(g)</label><input id="emulsionWeight" type="number" inputmode="decimal" placeholder="例：4000" oninput="calcEmulsion()" /><p class="note">豚肉＋豚脂＋氷を100%とし、豚肉＋豚脂80%、氷20%で計算します。氷＝豚肉＋豚脂×0.25。</p>`;
+  document.getElementById('emulsionInputs').innerHTML = html;
+}
+
+function calcEmulsion(){
+  const type = document.getElementById('emulsionType').value;
+  const w = Number(document.getElementById('emulsionWeight')?.value) || 0;
+  if(!w){ document.getElementById('emulsionResult').innerHTML = `<h3>計算結果</h3><p class="note" style="padding:12px;">重量を入力してください。</p>`; return; }
+  let rows = [];
+  let total = 0;
+  if(type === 'porkOnly'){
+    const pork = w;
+    const fat = pork / 3;
+    const ice = pork / 3;
+    total = pork + fat + ice;
+    rows = [['豚肉', `${fmt(pork)} g`], ['豚脂', `${fmt(fat)} g`], ['氷', `${fmt(ice)} g`]];
+  } else {
+    const porkFat = w;
+    const ice = porkFat * 0.25;
+    total = porkFat + ice;
+    rows = [['豚肉＋豚脂', `${fmt(porkFat)} g`], ['氷', `${fmt(ice)} g`]];
+  }
+  rows.push(['合計', `${fmt(total)} g`]);
+  rows.push(['塩', `${fmt(total * 0.016)} g`]);
+  rows.push(['ヘラビンE', `${fmt(total * 0.003)} g`]);
+  rows.push(['ペルビナールHH', `${fmt(total * 0.001)} g`]);
+  const title = type === 'porkOnly' ? '乳化生地：豚肉のみ' : '乳化生地：豚肉＋豚脂';
+  document.getElementById('emulsionResult').innerHTML = tableHtml(title, rows);
+  lastCopyText = `【乳化生地計算】\n${title}\n` + rows.map(r=>`${r[0]}：${r[1]}`).join('\n');
+}
+
+function renderAgingInputs(){
+  const type = document.getElementById('agingType').value;
+  const html = type === 'bacon'
+    ? `<label>豚バラ肉重量(g)</label><input id="agingWeight" type="number" inputmode="decimal" placeholder="例：5000" oninput="calcAging()" /><label>塩漬け開始日</label><input id="agingStart" type="date" value="${todayStr()}" onchange="calcAging()" />`
+    : `<label>骨付きもも肉重量(g)</label><input id="agingWeight" type="number" inputmode="decimal" placeholder="例：9000" oninput="calcAging()" /><label>仕込み日</label><input id="agingStart" type="date" value="${todayStr()}" onchange="calcAging()" /><label>熟成期間</label><select id="agingMonths" onchange="calcAging()"><option value="12">12か月</option><option value="18">18か月</option></select>`;
+  document.getElementById('agingInputs').innerHTML = html;
+}
+
+function calcAging(){
+  const type = document.getElementById('agingType').value;
+  const w = Number(document.getElementById('agingWeight')?.value) || 0;
+  const start = document.getElementById('agingStart')?.value || todayStr();
+  if(!w){ document.getElementById('agingResult').innerHTML = `<h3>計算結果</h3><p class="note" style="padding:12px;">重量を入力してください。</p>`; return; }
+  let rows = [];
+  let title = '';
+  if(type === 'bacon'){
+    title = 'ベーコン管理';
+    const salt = w * 0.025;
+    const sugar = salt * 0.25;
+    rows = [['豚バラ肉重量', `${fmt(w)} g`], ['塩', `${fmt(salt)} g`], ['三温糖', `${fmt(sugar)} g`], ['塩漬け開始日', start], ['塩漬け終了予定', addDays(start, 7)]];
+  } else {
+    title = '生ハム管理';
+    const months = Number(document.getElementById('agingMonths')?.value) || 12;
+    rows = [['骨付きもも肉重量', `${fmt(w)} g`], ['塩', `${fmt(w * 0.10)} g`], ['仕込み日', start], ['熟成期間', `${months}か月`], ['熟成完了予定日', addMonths(start, months)]];
+  }
+  document.getElementById('agingResult').innerHTML = tableHtml(title, rows);
+  lastCopyText = `【熟成管理】\n${title}\n` + rows.map(r=>`${r[0]}：${r[1]}`).join('\n');
+}
+
+async function copyCurrent(kind){
+  if(kind === 'product') calcProduct();
+  if(kind === 'emulsion') calcEmulsion();
+  if(kind === 'aging') calcAging();
+  if(!lastCopyText){ alert('先に重量を入力してください。'); return; }
+  try { await navigator.clipboard.writeText(lastCopyText); alert('コピーしました。GoodNotesやExcelへ貼り付けできます。'); }
+  catch(e){
+    const ta = document.createElement('textarea'); ta.className = 'copyBox'; ta.value = lastCopyText; document.querySelector('main').appendChild(ta); ta.select(); alert('自動コピーできない場合は、表示された文字を選択してコピーしてください。');
+  }
+}
+
+init();
+</script>
+</body>
+</html>
