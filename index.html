@@ -531,13 +531,15 @@
     const backButton = document.getElementById("backButton");
     const screenTitle = document.getElementById("screenTitle");
     const screenSubtitle = document.getElementById("screenSubtitle");
+    let currentBackHandler = showHome;
 
-    backButton.addEventListener("click", showHome);
+    backButton.addEventListener("click", () => currentBackHandler());
 
-    function setHeader(title, subtitle, canGoBack) {
+    function setHeader(title, subtitle, canGoBack, backHandler = showHome) {
       screenTitle.textContent = title;
       screenSubtitle.textContent = subtitle || "";
       topbar.classList.toggle("has-back", Boolean(canGoBack));
+      currentBackHandler = canGoBack && typeof backHandler === "function" ? backHandler : showHome;
     }
 
     function todayString() {
@@ -615,22 +617,22 @@
 
     function showCategory(categoryId) {
       if (categoryId === "own") {
-        showCardList("自社レシピ", "商品を選択してください", menuSections[0].items);
+        showCardList("自社レシピ", "商品を選択してください", menuSections[0].items, showHome);
         return;
       }
       if (categoryId === "clients") {
-        showCardList("委託製造", "委託先を選択してください", menuSections[1].items);
+        showCardList("委託製造", "委託先を選択してください", menuSections[1].items, showHome);
         return;
       }
       if (categoryId === "curing") {
-        showCardList("熟成管理", "管理項目を選択してください", menuSections[2].items.filter((item) => item.type === "curing"));
+        showCardList("熟成管理", "管理項目を選択してください", menuSections[2].items.filter((item) => item.type === "curing"), showHome);
         return;
       }
       showComingSoon(categoryId === "records" ? "製造記録" : "履歴一覧");
     }
 
-    function showCardList(title, subtitle, items) {
-      setHeader(title, subtitle, true);
+    function showCardList(title, subtitle, items, backHandler = showHome) {
+      setHeader(title, subtitle, true, backHandler);
       app.innerHTML = `
         <section class="section">
           <h2>${title}</h2>
@@ -679,7 +681,7 @@
 
     function showRecipe(recipeId) {
       const recipe = ownRecipes[recipeId];
-      setHeader(recipe.name, "自社レシピ 配合計算", true);
+      setHeader(recipe.name, "自社レシピ 配合計算", true, () => showCategory("own"));
       app.innerHTML = `<section class="section">${recipeCalculatorContentHtml(recipe, `recipe-${recipeId}`, true)}</section>`;
       bindRecipeCalculator(recipe, `recipe-${recipeId}`);
     }
@@ -1059,7 +1061,7 @@
 
     function showClient(clientId) {
       const client = outsourceClients[clientId];
-      setHeader(client.name, "委託先 専用ページ", true);
+      setHeader(client.name, "委託先 専用ページ", true, () => showCategory("clients"));
       if (client.planned) {
         app.innerHTML = `<section class="section"><h2>${client.name}</h2><div class="empty">追加予定です。配合仕様は要確認です。</div></section>`;
         return;
@@ -1256,7 +1258,7 @@
     }
 
     function showBacon() {
-      setHeader("ベーコン", "塩・三温糖・塩漬け予定", true);
+      setHeader("ベーコン", "塩・三温糖・塩漬け予定", true, () => showCategory("curing"));
       app.innerHTML = `
         <section class="section">
           <div class="field-row">
@@ -1306,7 +1308,7 @@
     }
 
     function showProsciutto() {
-      setHeader("生ハム", "塩・熟成完了予定", true);
+      setHeader("生ハム", "塩・熟成完了予定", true, () => showCategory("curing"));
       app.innerHTML = `
         <section class="section">
           <div class="field-row">
@@ -1363,7 +1365,7 @@
     }
 
     function showEmulsion() {
-      setHeader("乳化生地", "豚肉のみ / 豚肉＋豚脂", true);
+      setHeader("乳化生地", "豚肉のみ / 豚肉＋豚脂", true, showHome);
       app.innerHTML = `
         <section class="section">
           <div class="field-row">
