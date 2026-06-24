@@ -398,6 +398,19 @@
       font-weight: 700;
     }
 
+    .record-summary {
+      display: grid;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .record-actions {
+      display: grid;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
     @media (max-width: 620px) {
       body {
         font-size: 18px;
@@ -451,6 +464,7 @@
     const appState = {
       activeClientTab: "calc"
     };
+    const MANUFACTURING_RECORDS_KEY = "meatRecipeApp.manufacturingRecords.v1";
 
     const ownRecipes = {
       arabiki: { name: "あらびき", description: "自社レシピ", kind: "own" },
@@ -589,6 +603,10 @@
       if (type === "client") showClient(id);
       if (type === "curing") showCuring(id);
       if (type === "emulsion") showEmulsion();
+      if (type === "record-new") showManufacturingRecordForm();
+      if (type === "record-history") showManufacturingRecordHistory();
+      if (type === "record-csv") showManufacturingRecordCsv();
+      if (type === "record-detail") showManufacturingRecordDetail(id);
     });
 
     function showHome() {
@@ -598,8 +616,8 @@
         { label: "委託製造", description: "山小屋・ジビエセンター", type: "category", id: "clients" },
         { label: "乳化生地", description: "豚肉のみ / 豚肉＋豚脂", type: "emulsion", id: "emulsion" },
         { label: "熟成管理", description: "ベーコン・生ハム", type: "category", id: "curing" },
-        { label: "製造記録", description: "準備中", type: "category", id: "records" },
-        { label: "履歴一覧", description: "準備中", type: "category", id: "history" }
+        { label: "製造記録", description: "記録・履歴・CSV", type: "category", id: "records" },
+        { label: "履歴一覧", description: "製造記録の確認", type: "category", id: "history" }
       ];
       app.innerHTML = `
         <section class="section">
@@ -628,7 +646,15 @@
         showCardList("熟成管理", "管理項目を選択してください", menuSections[2].items.filter((item) => item.type === "curing"), showHome);
         return;
       }
-      showComingSoon(categoryId === "records" ? "製造記録" : "履歴一覧");
+      if (categoryId === "records") {
+        showManufacturingRecordTop();
+        return;
+      }
+      if (categoryId === "history") {
+        showManufacturingRecordHistory(showHome);
+        return;
+      }
+      showComingSoon("履歴一覧");
     }
 
     function showCardList(title, subtitle, items, backHandler = showHome) {
@@ -645,6 +671,349 @@
           </div>
         </section>
       `;
+    }
+
+    function showManufacturingRecordTop() {
+      setHeader("製造記録", "記録・履歴・CSV出力", true, showHome);
+      const items = [
+        { label: "新規製造記録", description: "製造内容を入力して保存", type: "record-new", id: "new" },
+        { label: "製造記録履歴", description: "保存した記録を確認", type: "record-history", id: "history" },
+        { label: "CSV出力", description: "保存済み記録を書き出し", type: "record-csv", id: "csv" }
+      ];
+      app.innerHTML = `
+        <section class="section">
+          <h2>製造記録</h2>
+          <div class="grid menu-grid">
+            ${items.map((item) => `
+              <button class="menu-button" type="button" data-type="${item.type}" data-id="${item.id}">
+                <strong>${item.label}</strong><span>${item.description}</span>
+              </button>
+            `).join("")}
+          </div>
+        </section>
+      `;
+    }
+
+    function showManufacturingRecordForm() {
+      setHeader("新規製造記録", "localStorageに保存", true, showManufacturingRecordTop);
+      app.innerHTML = `
+        <section class="section">
+          <h2>基本情報</h2>
+          <div class="field-row">
+            <label>製造日
+              <input id="recordDate" type="date" value="${todayString()}">
+            </label>
+            <label>製造区分
+              <select id="recordCategory">
+                <option value="自社レシピ">自社レシピ</option>
+                <option value="委託製造">委託製造</option>
+                <option value="乳化生地">乳化生地</option>
+                <option value="熟成管理">熟成管理</option>
+              </select>
+            </label>
+            <label>製品名
+              <input id="recordProduct" type="text" autocomplete="off">
+            </label>
+            <label>製造ロット番号
+              <input id="recordLot" type="text" autocomplete="off">
+            </label>
+            <label>担当者
+              <input id="recordStaff" type="text" autocomplete="off">
+            </label>
+            <label>メモ
+              <textarea id="recordMemo"></textarea>
+            </label>
+          </div>
+        </section>
+        <section class="section">
+          <h2>原料情報</h2>
+          <div class="field-row">
+            <label>6mm肉重量(g)
+              <input id="recordMeat6mm" type="number" inputmode="decimal" min="0" step="0.1" value="0">
+            </label>
+            <label>3mm肉重量(g)
+              <input id="recordMeat3mm" type="number" inputmode="decimal" min="0" step="0.1" value="0">
+            </label>
+            <div class="product-name" id="recordMeatTotalDisplay">肉重量合計(g): 0.0g</div>
+            <label>乳化生地重量(g)
+              <input id="recordEmulsionWeight" type="number" inputmode="decimal" min="0" step="0.1" value="0">
+            </label>
+            <label>その他原料メモ
+              <textarea id="recordMaterialMemo"></textarea>
+            </label>
+          </div>
+        </section>
+        <section class="section">
+          <h2>加熱・冷却記録</h2>
+          <div class="field-row">
+            <label>加熱開始時刻
+              <input id="recordHeatStart" type="time">
+            </label>
+            <label>加熱終了時刻
+              <input id="recordHeatEnd" type="time">
+            </label>
+            <label>中心温度(℃)
+              <input id="recordCoreTemp" type="number" inputmode="decimal" step="0.1">
+            </label>
+            <label>冷却開始時刻
+              <input id="recordCoolStart" type="time">
+            </label>
+            <label>冷却終了時刻
+              <input id="recordCoolEnd" type="time">
+            </label>
+            <label>冷却後温度(℃)
+              <input id="recordCoolTemp" type="number" inputmode="decimal" step="0.1">
+            </label>
+            <label>判定
+              <select id="recordJudgement">
+                <option value="OK">OK</option>
+                <option value="要確認">要確認</option>
+              </select>
+            </label>
+          </div>
+        </section>
+        <section class="section">
+          <h2>包装・歩留まり</h2>
+          <div class="field-row">
+            <label>完成重量(g)
+              <input id="recordFinishedWeight" type="number" inputmode="decimal" min="0" step="0.1" value="0">
+            </label>
+            <label>包装数
+              <input id="recordPackageCount" type="number" inputmode="numeric" min="0" step="1" value="0">
+            </label>
+            <label>ロス重量(g)
+              <input id="recordLossWeight" type="number" inputmode="decimal" min="0" step="0.1" value="0">
+            </label>
+            <div class="product-name" id="recordYieldDisplay">歩留まり率: 0.0%</div>
+            <button id="recordGoodNotes" class="secondary" type="button">GoodNotes転記</button>
+            <button id="recordSave" class="primary" type="button">保存</button>
+          </div>
+          <div class="copy-area">
+            <textarea id="recordGoodNotesText" readonly></textarea>
+            <div id="recordStatus" class="status"></div>
+          </div>
+        </section>
+      `;
+      bindManufacturingRecordForm();
+    }
+
+    function bindManufacturingRecordForm() {
+      const ids = [
+        "recordDate", "recordCategory", "recordProduct", "recordLot", "recordStaff", "recordMemo",
+        "recordMeat6mm", "recordMeat3mm", "recordEmulsionWeight", "recordMaterialMemo",
+        "recordHeatStart", "recordHeatEnd", "recordCoreTemp", "recordCoolStart", "recordCoolEnd",
+        "recordCoolTemp", "recordJudgement", "recordFinishedWeight", "recordPackageCount", "recordLossWeight"
+      ];
+      const elements = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
+      const meatTotalDisplay = document.getElementById("recordMeatTotalDisplay");
+      const yieldDisplay = document.getElementById("recordYieldDisplay");
+      const goodNotesText = document.getElementById("recordGoodNotesText");
+      const status = document.getElementById("recordStatus");
+
+      const render = () => {
+        const record = collectManufacturingRecord(elements);
+        meatTotalDisplay.textContent = `肉重量合計(g): ${formatNumber(record.meatTotal)}g`;
+        yieldDisplay.textContent = `歩留まり率: ${formatNumber(record.yieldRate)}%`;
+        goodNotesText.value = buildManufacturingRecordText(record);
+      };
+
+      ids.forEach((id) => elements[id].addEventListener("input", render));
+      elements.recordCategory.addEventListener("change", render);
+      elements.recordJudgement.addEventListener("change", render);
+      document.getElementById("recordGoodNotes").addEventListener("click", render);
+      document.getElementById("recordSave").addEventListener("click", () => {
+        const record = collectManufacturingRecord(elements);
+        record.id = `${Date.now()}`;
+        record.savedAt = new Date().toISOString();
+        const records = loadManufacturingRecords();
+        records.unshift(record);
+        saveManufacturingRecords(records);
+        goodNotesText.value = buildManufacturingRecordText(record);
+        status.textContent = "製造記録を保存しました";
+      });
+      render();
+    }
+
+    function collectManufacturingRecord(elements) {
+      const meat6mm = Math.max(Number(elements.recordMeat6mm.value || 0), 0);
+      const meat3mm = Math.max(Number(elements.recordMeat3mm.value || 0), 0);
+      const meatTotal = meat6mm + meat3mm;
+      const finishedWeight = Math.max(Number(elements.recordFinishedWeight.value || 0), 0);
+      return {
+        date: elements.recordDate.value,
+        category: elements.recordCategory.value,
+        product: elements.recordProduct.value.trim(),
+        lot: elements.recordLot.value.trim(),
+        staff: elements.recordStaff.value.trim(),
+        memo: elements.recordMemo.value.trim(),
+        meat6mm,
+        meat3mm,
+        meatTotal,
+        emulsionWeight: Math.max(Number(elements.recordEmulsionWeight.value || 0), 0),
+        materialMemo: elements.recordMaterialMemo.value.trim(),
+        heatStart: elements.recordHeatStart.value,
+        heatEnd: elements.recordHeatEnd.value,
+        coreTemp: elements.recordCoreTemp.value,
+        coolStart: elements.recordCoolStart.value,
+        coolEnd: elements.recordCoolEnd.value,
+        coolTemp: elements.recordCoolTemp.value,
+        judgement: elements.recordJudgement.value,
+        finishedWeight,
+        packageCount: elements.recordPackageCount.value,
+        lossWeight: Math.max(Number(elements.recordLossWeight.value || 0), 0),
+        yieldRate: meatTotal > 0 ? finishedWeight / meatTotal * 100 : 0
+      };
+    }
+
+    function buildManufacturingRecordText(record) {
+      return [
+        "【製造記録】",
+        "",
+        `製造日：${record.date || ""}`,
+        `製造区分：${record.category || ""}`,
+        `製品名：${record.product || ""}`,
+        `ロット番号：${record.lot || ""}`,
+        `担当者：${record.staff || ""}`,
+        "",
+        `6mm肉重量：${formatNumber(record.meat6mm)}g`,
+        `3mm肉重量：${formatNumber(record.meat3mm)}g`,
+        `肉重量合計：${formatNumber(record.meatTotal)}g`,
+        `乳化生地重量：${formatNumber(record.emulsionWeight)}g`,
+        record.materialMemo ? `その他原料メモ：${record.materialMemo}` : "その他原料メモ：",
+        "",
+        `加熱開始：${record.heatStart || ""}`,
+        `加熱終了：${record.heatEnd || ""}`,
+        `中心温度：${record.coreTemp || ""}`,
+        `冷却開始：${record.coolStart || ""}`,
+        `冷却終了：${record.coolEnd || ""}`,
+        `冷却後温度：${record.coolTemp || ""}`,
+        `判定：${record.judgement || ""}`,
+        "",
+        `完成重量：${formatNumber(record.finishedWeight)}g`,
+        `包装数：${record.packageCount || ""}`,
+        `ロス重量：${formatNumber(record.lossWeight)}g`,
+        `歩留まり率：${formatNumber(record.yieldRate)}%`,
+        "",
+        `メモ：${record.memo || ""}`
+      ].join("\n");
+    }
+
+    function loadManufacturingRecords() {
+      try {
+        const parsed = JSON.parse(localStorage.getItem(MANUFACTURING_RECORDS_KEY) || "[]");
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (error) {
+        return [];
+      }
+    }
+
+    function saveManufacturingRecords(records) {
+      localStorage.setItem(MANUFACTURING_RECORDS_KEY, JSON.stringify(records));
+    }
+
+    function showManufacturingRecordHistory(backHandler = showManufacturingRecordTop) {
+      setHeader("製造記録履歴", "保存した記録", true, backHandler);
+      const records = loadManufacturingRecords();
+      app.innerHTML = `
+        <section class="section">
+          <h2>製造記録履歴</h2>
+          ${records.length === 0 ? `<div class="empty">保存された製造記録はまだありません。</div>` : `
+            <div class="grid menu-grid">
+              ${records.map((record) => `
+                <button class="menu-button" type="button" data-type="record-detail" data-id="${record.id}">
+                  <strong>${escapeHtml(record.date || "日付未入力")} ${escapeHtml(record.product || "製品名未入力")}</strong>
+                  <span>${escapeHtml(record.category || "")} / ロット: ${escapeHtml(record.lot || "未入力")} / 判定: ${escapeHtml(record.judgement || "")}</span>
+                </button>
+              `).join("")}
+            </div>
+          `}
+        </section>
+      `;
+    }
+
+    function showManufacturingRecordDetail(recordId) {
+      const record = loadManufacturingRecords().find((item) => item.id === recordId);
+      setHeader("製造記録詳細", "保存内容", true, showManufacturingRecordHistory);
+      if (!record) {
+        app.innerHTML = `<section class="section"><div class="empty">製造記録が見つかりません。</div></section>`;
+        return;
+      }
+      app.innerHTML = `
+        <section class="section">
+          <h2>${escapeHtml(record.product || "製品名未入力")}</h2>
+          <div class="record-summary">
+            <div>製造日：${escapeHtml(record.date || "")}</div>
+            <div>製造区分：${escapeHtml(record.category || "")}</div>
+            <div>ロット番号：${escapeHtml(record.lot || "")}</div>
+            <div>担当者：${escapeHtml(record.staff || "")}</div>
+            <div>判定：${escapeHtml(record.judgement || "")}</div>
+          </div>
+          <div class="copy-area">
+            <textarea id="recordDetailText" readonly></textarea>
+            <div class="record-actions">
+              <button id="recordDetailCopy" class="primary" type="button">GoodNotes用にコピー</button>
+            </div>
+            <div id="recordDetailStatus" class="status"></div>
+          </div>
+        </section>
+      `;
+      document.getElementById("recordDetailText").value = buildManufacturingRecordText(record);
+      document.getElementById("recordDetailCopy").addEventListener("click", () => {
+        copyToClipboard(document.getElementById("recordDetailText").value, document.getElementById("recordDetailStatus"));
+      });
+    }
+
+    function showManufacturingRecordCsv() {
+      setHeader("CSV出力", "UTF-8 BOM付き", true, showManufacturingRecordTop);
+      const records = loadManufacturingRecords();
+      app.innerHTML = `
+        <section class="section">
+          <h2>CSV出力</h2>
+          <div class="empty">保存済み製造記録：${records.length}件</div>
+          <div class="record-actions">
+            <button id="recordCsvDownload" class="primary" type="button" ${records.length === 0 ? "disabled" : ""}>CSVをダウンロード</button>
+          </div>
+          <div id="recordCsvStatus" class="status"></div>
+        </section>
+      `;
+      document.getElementById("recordCsvDownload").addEventListener("click", () => downloadManufacturingRecordsCsv(records));
+    }
+
+    function downloadManufacturingRecordsCsv(records) {
+      const headers = ["製造日", "製造区分", "製品名", "ロット番号", "担当者", "6mm肉重量", "3mm肉重量", "肉重量合計", "乳化生地重量", "加熱開始", "加熱終了", "中心温度", "冷却開始", "冷却終了", "冷却後温度", "判定", "完成重量", "包装数", "ロス重量", "歩留まり率", "メモ"];
+      const rows = records.map((record) => [
+        record.date, record.category, record.product, record.lot, record.staff,
+        formatNumber(record.meat6mm), formatNumber(record.meat3mm), formatNumber(record.meatTotal), formatNumber(record.emulsionWeight),
+        record.heatStart, record.heatEnd, record.coreTemp, record.coolStart, record.coolEnd, record.coolTemp, record.judgement,
+        formatNumber(record.finishedWeight), record.packageCount, formatNumber(record.lossWeight), formatNumber(record.yieldRate), record.memo
+      ]);
+      const csv = [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n");
+      const blob = new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `manufacturing-records-${todayString()}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      const status = document.getElementById("recordCsvStatus");
+      if (status) status.textContent = "CSVを出力しました";
+    }
+
+    function csvCell(value) {
+      const text = value == null ? "" : String(value);
+      return `"${text.replace(/"/g, '""')}"`;
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      }[char]));
     }
 
     function showComingSoon(title) {
