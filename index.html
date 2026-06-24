@@ -465,6 +465,7 @@
       activeClientTab: "calc"
     };
     const MANUFACTURING_RECORDS_KEY = "meatRecipeApp.manufacturingRecords.v1";
+    const MANUFACTURING_RECORD_CSV_HEADERS = ["仕込み日", "製造日", "製造区分", "レシピ名", "ロット番号", "担当者", "6mm肉重量", "3mm肉重量", "肉重量合計", "乳化生地重量", "成形本数", "加熱後本数", "包装数", "余り本数", "ロス本数", "完成重量", "ロス重量", "歩留まり率", "メモ"];
 
     const ownRecipes = {
       arabiki: { name: "あらびき", description: "自社レシピ", kind: "own" },
@@ -1044,14 +1045,13 @@
     }
 
     function downloadManufacturingRecordsCsv(records) {
-      const headers = ["仕込み日", "製造日", "製造区分", "レシピ名", "ロット番号", "担当者", "6mm肉重量", "3mm肉重量", "肉重量合計", "乳化生地重量", "成形本数", "加熱後本数", "包装数", "余り本数", "ロス本数", "完成重量", "ロス重量", "歩留まり率", "メモ"];
       const rows = records.map((record) => [
         record.prepDate, record.date, record.category, record.recipeName || record.product, record.lot, record.staff,
-        formatRecordNumber(record.meat6mm), formatRecordNumber(record.meat3mm), formatRecordNumber(record.meatTotal), formatRecordNumber(record.emulsionWeight),
+        csvNumber(record.meat6mm), csvNumber(record.meat3mm), csvNumber(record.meatTotal), csvNumber(record.emulsionWeight),
         record.moldedCount, record.heatedCount, record.packageCount, record.leftoverCount, record.lossCount,
-        formatRecordNumber(record.finishedWeight), formatRecordNumber(record.lossWeight), formatRecordNumber(record.yieldRate), record.memo
+        csvNumber(record.finishedWeight), csvNumber(record.lossWeight), csvNumber(record.yieldRate), record.memo
       ]);
-      const csv = [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n");
+      const csv = [MANUFACTURING_RECORD_CSV_HEADERS, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n");
       const blob = new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -1068,6 +1068,11 @@
     function csvCell(value) {
       const text = value == null ? "" : String(value);
       return `"${text.replace(/"/g, '""')}"`;
+    }
+
+    function csvNumber(value) {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric.toFixed(1) : "0.0";
     }
 
     function formatRecordNumber(value) {
