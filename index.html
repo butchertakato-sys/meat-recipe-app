@@ -768,7 +768,7 @@
           meat3mm: meat3mm / splitCount,
           meatTotal: meat / splitCount
         } : null;
-        result.innerHTML = `${splitCount > 1 ? `<p class="note">表示：${splitLabel}（1回分あたりの分量）</p>` : ""}${tableHtml(displayRows, displayTotal)}`;
+        result.innerHTML = `${splitCount > 1 ? `<p class="note">表示：${splitLabel}（1回分あたりの分量）</p>` : ""}${meatInfoHtml(splitMeatInfo)}${tableHtml(displayRows, displayTotal)}`;
         if (recipe.kind === "touge") {
           copyText.value = buildTougeCopyText(recipe, displayRows, displayTotal, productionDateInput.value, splitLabel, splitMeatInfo, emulsionMode);
         } else {
@@ -931,6 +931,26 @@
           <div class="result-row">
             <div class="result-name">合計</div>
             <div class="result-value">${formatNumber(total)}${unit}</div>
+          </div>
+        </div>
+      `;
+    }
+
+    function meatInfoHtml(meatInfo, unit = "g") {
+      if (!meatInfo) return "";
+      return `
+        <div class="result-box">
+          <div class="result-row">
+            <div class="result-name">6mm肉重量</div>
+            <div class="result-value">${formatNumber(meatInfo.meat6mm)}${unit}</div>
+          </div>
+          <div class="result-row">
+            <div class="result-name">3mm肉重量</div>
+            <div class="result-value">${formatNumber(meatInfo.meat3mm)}${unit}</div>
+          </div>
+          <div class="result-row">
+            <div class="result-name">肉重量合計</div>
+            <div class="result-value">${formatNumber(meatInfo.meatTotal)}${unit}</div>
           </div>
         </div>
       `;
