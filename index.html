@@ -695,11 +695,14 @@
     }
 
     function showManufacturingRecordForm() {
-      setHeader("新規製造記録", "localStorageに保存", true, showManufacturingRecordTop);
+      setHeader("新規製造記録", "既存レシピから記録", true, showManufacturingRecordTop);
       app.innerHTML = `
         <section class="section">
           <h2>基本情報</h2>
           <div class="field-row">
+            <label>仕込み日
+              <input id="recordPrepDate" type="date" value="${todayString()}">
+            </label>
             <label>製造日
               <input id="recordDate" type="date" value="${todayString()}">
             </label>
@@ -707,12 +710,10 @@
               <select id="recordCategory">
                 <option value="自社レシピ">自社レシピ</option>
                 <option value="委託製造">委託製造</option>
-                <option value="乳化生地">乳化生地</option>
-                <option value="熟成管理">熟成管理</option>
               </select>
             </label>
-            <label>製品名
-              <input id="recordProduct" type="text" autocomplete="off">
+            <label>レシピ名
+              <select id="recordRecipe"></select>
             </label>
             <label>製造ロット番号
               <input id="recordLot" type="text" autocomplete="off">
@@ -726,60 +727,53 @@
           </div>
         </section>
         <section class="section">
-          <h2>原料情報</h2>
+          <h2>レシピ由来の情報</h2>
           <div class="field-row">
             <label>6mm肉重量(g)
-              <input id="recordMeat6mm" type="number" inputmode="decimal" min="0" step="0.1" value="0">
+              <input id="recordMeat6mm" type="number" inputmode="decimal" min="0" step="0.1" value="1000">
             </label>
             <label>3mm肉重量(g)
               <input id="recordMeat3mm" type="number" inputmode="decimal" min="0" step="0.1" value="0">
             </label>
-            <div class="product-name" id="recordMeatTotalDisplay">肉重量合計(g): 0.0g</div>
-            <label>乳化生地重量(g)
-              <input id="recordEmulsionWeight" type="number" inputmode="decimal" min="0" step="0.1" value="0">
-            </label>
-            <label>その他原料メモ
-              <textarea id="recordMaterialMemo"></textarea>
-            </label>
+            <div class="product-name" id="recordMeatTotalDisplay">肉重量合計(g): 1,000.0g</div>
+            <div id="recordEmulsionControls">
+              <div class="radio-group" role="radiogroup" aria-label="乳化生地">
+                <label class="radio-option">
+                  <input id="recordEmulsionAuto" name="recordEmulsionMode" type="radio" value="auto" checked>
+                  乳化生地 自動計算
+                </label>
+                <label class="radio-option">
+                  <input id="recordEmulsionManual" name="recordEmulsionMode" type="radio" value="manual">
+                  乳化生地 手入力
+                </label>
+              </div>
+              <label id="recordManualEmulsionWrap" style="display:none">乳化生地重量(g)
+                <input id="recordEmulsionWeight" type="number" inputmode="decimal" min="0" step="0.1" value="0">
+              </label>
+            </div>
           </div>
+          <div id="recordRecipeResult"></div>
         </section>
         <section class="section">
-          <h2>加熱・冷却記録</h2>
+          <h2>製造数記録</h2>
           <div class="field-row">
-            <label>加熱開始時刻
-              <input id="recordHeatStart" type="time">
+            <label>成形本数
+              <input id="recordMoldedCount" type="number" inputmode="numeric" min="0" step="1" value="0">
             </label>
-            <label>加熱終了時刻
-              <input id="recordHeatEnd" type="time">
-            </label>
-            <label>中心温度(℃)
-              <input id="recordCoreTemp" type="number" inputmode="decimal" step="0.1">
-            </label>
-            <label>冷却開始時刻
-              <input id="recordCoolStart" type="time">
-            </label>
-            <label>冷却終了時刻
-              <input id="recordCoolEnd" type="time">
-            </label>
-            <label>冷却後温度(℃)
-              <input id="recordCoolTemp" type="number" inputmode="decimal" step="0.1">
-            </label>
-            <label>判定
-              <select id="recordJudgement">
-                <option value="OK">OK</option>
-                <option value="要確認">要確認</option>
-              </select>
-            </label>
-          </div>
-        </section>
-        <section class="section">
-          <h2>包装・歩留まり</h2>
-          <div class="field-row">
-            <label>完成重量(g)
-              <input id="recordFinishedWeight" type="number" inputmode="decimal" min="0" step="0.1" value="0">
+            <label>加熱後本数
+              <input id="recordHeatedCount" type="number" inputmode="numeric" min="0" step="1" value="0">
             </label>
             <label>包装数
               <input id="recordPackageCount" type="number" inputmode="numeric" min="0" step="1" value="0">
+            </label>
+            <label>余り本数
+              <input id="recordLeftoverCount" type="number" inputmode="numeric" min="0" step="1" value="0">
+            </label>
+            <label>ロス本数
+              <input id="recordLossCount" type="number" inputmode="numeric" min="0" step="1" value="0">
+            </label>
+            <label>完成重量(g)
+              <input id="recordFinishedWeight" type="number" inputmode="decimal" min="0" step="0.1" value="0">
             </label>
             <label>ロス重量(g)
               <input id="recordLossWeight" type="number" inputmode="decimal" min="0" step="0.1" value="0">
@@ -797,32 +791,85 @@
       bindManufacturingRecordForm();
     }
 
+    function recordRecipeOptions(category = "自社レシピ") {
+      const own = Object.entries(ownRecipes).map(([id, recipe]) => ({
+        id: `own:${id}`,
+        category: "自社レシピ",
+        label: recipe.name,
+        recipe
+      }));
+      const clientOptions = [];
+      const yamanoya = outsourceClients.yamanoya;
+      clientOptions.push({
+        id: "client:yamanoya",
+        category: "委託製造",
+        label: `${yamanoya.name} / ${yamanoya.recipe.productName || yamanoya.recipe.name}`,
+        recipe: yamanoya.recipe
+      });
+      const touge = outsourceClients.touge;
+      touge.recipes.forEach((recipe, index) => {
+        clientOptions.push({
+          id: `client:touge:${index}`,
+          category: "委託製造",
+          label: `${touge.name} / ${recipe.productName || recipe.name}`,
+          recipe
+        });
+      });
+      return [...own, ...clientOptions].filter((option) => option.category === category);
+    }
+
+    function getRecordRecipeOption(optionId, category) {
+      return recordRecipeOptions(category).find((option) => option.id === optionId) || recordRecipeOptions(category)[0];
+    }
+
     function bindManufacturingRecordForm() {
       const ids = [
-        "recordDate", "recordCategory", "recordProduct", "recordLot", "recordStaff", "recordMemo",
-        "recordMeat6mm", "recordMeat3mm", "recordEmulsionWeight", "recordMaterialMemo",
-        "recordHeatStart", "recordHeatEnd", "recordCoreTemp", "recordCoolStart", "recordCoolEnd",
-        "recordCoolTemp", "recordJudgement", "recordFinishedWeight", "recordPackageCount", "recordLossWeight"
+        "recordPrepDate", "recordDate", "recordCategory", "recordRecipe", "recordLot", "recordStaff", "recordMemo",
+        "recordMeat6mm", "recordMeat3mm", "recordEmulsionWeight",
+        "recordMoldedCount", "recordHeatedCount", "recordPackageCount", "recordLeftoverCount", "recordLossCount",
+        "recordFinishedWeight", "recordLossWeight"
       ];
       const elements = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
+      const emulsionAuto = document.getElementById("recordEmulsionAuto");
+      const emulsionManual = document.getElementById("recordEmulsionManual");
+      const emulsionControls = document.getElementById("recordEmulsionControls");
+      const manualEmulsionWrap = document.getElementById("recordManualEmulsionWrap");
       const meatTotalDisplay = document.getElementById("recordMeatTotalDisplay");
+      const recipeResult = document.getElementById("recordRecipeResult");
       const yieldDisplay = document.getElementById("recordYieldDisplay");
       const goodNotesText = document.getElementById("recordGoodNotesText");
       const status = document.getElementById("recordStatus");
 
+      const refreshRecipeOptions = () => {
+        const options = recordRecipeOptions(elements.recordCategory.value);
+        elements.recordRecipe.innerHTML = options.map((option) => `<option value="${option.id}">${option.label}</option>`).join("");
+      };
+
       const render = () => {
-        const record = collectManufacturingRecord(elements);
+        const record = collectManufacturingRecord(elements, emulsionAuto, emulsionManual);
+        const showEmulsion = record.recipeKind === "own" || record.recipeKind === "touge";
+        emulsionControls.style.display = showEmulsion ? "grid" : "none";
+        manualEmulsionWrap.style.display = showEmulsion && record.emulsionMode === "手入力" ? "grid" : "none";
         meatTotalDisplay.textContent = `肉重量合計(g): ${formatNumber(record.meatTotal)}g`;
         yieldDisplay.textContent = `歩留まり率: ${formatNumber(record.yieldRate)}%`;
+        recipeResult.innerHTML = `${meatInfoHtml({ meat6mm: record.meat6mm, meat3mm: record.meat3mm, meatTotal: record.meatTotal })}${tableHtml(record.recipeRows, record.recipeTotal)}`;
         goodNotesText.value = buildManufacturingRecordText(record);
       };
 
-      ids.forEach((id) => elements[id].addEventListener("input", render));
-      elements.recordCategory.addEventListener("change", render);
-      elements.recordJudgement.addEventListener("change", render);
+      refreshRecipeOptions();
+      elements.recordCategory.addEventListener("change", () => {
+        refreshRecipeOptions();
+        render();
+      });
+      ids.forEach((id) => {
+        if (id !== "recordCategory") elements[id].addEventListener("input", render);
+        if (id === "recordRecipe") elements[id].addEventListener("change", render);
+      });
+      emulsionAuto.addEventListener("change", render);
+      emulsionManual.addEventListener("change", render);
       document.getElementById("recordGoodNotes").addEventListener("click", render);
       document.getElementById("recordSave").addEventListener("click", () => {
-        const record = collectManufacturingRecord(elements);
+        const record = collectManufacturingRecord(elements, emulsionAuto, emulsionManual);
         record.id = `${Date.now()}`;
         record.savedAt = new Date().toISOString();
         const records = loadManufacturingRecords();
@@ -834,32 +881,47 @@
       render();
     }
 
-    function collectManufacturingRecord(elements) {
+    function collectManufacturingRecord(elements, emulsionAuto, emulsionManual) {
+      const option = getRecordRecipeOption(elements.recordRecipe.value, elements.recordCategory.value);
       const meat6mm = Math.max(Number(elements.recordMeat6mm.value || 0), 0);
       const meat3mm = Math.max(Number(elements.recordMeat3mm.value || 0), 0);
       const meatTotal = meat6mm + meat3mm;
+      const water = meatTotal * 0.2;
+      const useManualEmulsion = Boolean(emulsionManual && emulsionManual.checked);
+      const emulsionMode = useManualEmulsion ? "手入力" : "自動計算";
+      const needsEmulsion = option.recipe.kind === "own" || option.recipe.kind === "touge";
+      const emulsionWeight = needsEmulsion
+        ? (useManualEmulsion ? Math.max(Number(elements.recordEmulsionWeight.value || 0), 0) : (meatTotal + water) * 0.2)
+        : 0;
+      const recipeNameForCalc = option.recipe.baseRecipeName || option.recipe.name;
+      const recipeRows = option.recipe.kind === "yamanoya"
+        ? calculateYamanoya(meatTotal)
+        : calculateOwnRecipe(recipeNameForCalc, meatTotal, emulsionWeight, emulsionMode);
+      const recipeTotal = recipeRows.reduce((sum, row) => sum + row.calculated, 0);
       const finishedWeight = Math.max(Number(elements.recordFinishedWeight.value || 0), 0);
       return {
+        prepDate: elements.recordPrepDate.value,
         date: elements.recordDate.value,
-        category: elements.recordCategory.value,
-        product: elements.recordProduct.value.trim(),
+        category: option.category,
+        recipeId: option.id,
+        recipeName: option.label,
+        recipeKind: option.recipe.kind,
         lot: elements.recordLot.value.trim(),
         staff: elements.recordStaff.value.trim(),
         memo: elements.recordMemo.value.trim(),
         meat6mm,
         meat3mm,
         meatTotal,
-        emulsionWeight: Math.max(Number(elements.recordEmulsionWeight.value || 0), 0),
-        materialMemo: elements.recordMaterialMemo.value.trim(),
-        heatStart: elements.recordHeatStart.value,
-        heatEnd: elements.recordHeatEnd.value,
-        coreTemp: elements.recordCoreTemp.value,
-        coolStart: elements.recordCoolStart.value,
-        coolEnd: elements.recordCoolEnd.value,
-        coolTemp: elements.recordCoolTemp.value,
-        judgement: elements.recordJudgement.value,
-        finishedWeight,
+        emulsionMode: needsEmulsion ? emulsionMode : "",
+        emulsionWeight,
+        recipeRows,
+        recipeTotal,
+        moldedCount: elements.recordMoldedCount.value,
+        heatedCount: elements.recordHeatedCount.value,
         packageCount: elements.recordPackageCount.value,
+        leftoverCount: elements.recordLeftoverCount.value,
+        lossCount: elements.recordLossCount.value,
+        finishedWeight,
         lossWeight: Math.max(Number(elements.recordLossWeight.value || 0), 0),
         yieldRate: meatTotal > 0 ? finishedWeight / meatTotal * 100 : 0
       };
@@ -869,30 +931,27 @@
       return [
         "【製造記録】",
         "",
+        `仕込み日：${record.prepDate || ""}`,
         `製造日：${record.date || ""}`,
         `製造区分：${record.category || ""}`,
-        `製品名：${record.product || ""}`,
+        `レシピ名：${record.recipeName || record.product || ""}`,
         `ロット番号：${record.lot || ""}`,
         `担当者：${record.staff || ""}`,
         "",
-        `6mm肉重量：${formatNumber(record.meat6mm)}g`,
-        `3mm肉重量：${formatNumber(record.meat3mm)}g`,
-        `肉重量合計：${formatNumber(record.meatTotal)}g`,
-        `乳化生地重量：${formatNumber(record.emulsionWeight)}g`,
-        record.materialMemo ? `その他原料メモ：${record.materialMemo}` : "その他原料メモ：",
+        `6mm肉重量：${formatRecordNumber(record.meat6mm)}g`,
+        `3mm肉重量：${formatRecordNumber(record.meat3mm)}g`,
+        `肉重量合計：${formatRecordNumber(record.meatTotal)}g`,
+        `乳化生地重量：${formatRecordNumber(record.emulsionWeight)}g`,
         "",
-        `加熱開始：${record.heatStart || ""}`,
-        `加熱終了：${record.heatEnd || ""}`,
-        `中心温度：${record.coreTemp || ""}`,
-        `冷却開始：${record.coolStart || ""}`,
-        `冷却終了：${record.coolEnd || ""}`,
-        `冷却後温度：${record.coolTemp || ""}`,
-        `判定：${record.judgement || ""}`,
-        "",
-        `完成重量：${formatNumber(record.finishedWeight)}g`,
+        `成形本数：${record.moldedCount || ""}`,
+        `加熱後本数：${record.heatedCount || ""}`,
         `包装数：${record.packageCount || ""}`,
-        `ロス重量：${formatNumber(record.lossWeight)}g`,
-        `歩留まり率：${formatNumber(record.yieldRate)}%`,
+        `余り本数：${record.leftoverCount || ""}`,
+        `ロス本数：${record.lossCount || ""}`,
+        "",
+        `完成重量：${formatRecordNumber(record.finishedWeight)}g`,
+        `ロス重量：${formatRecordNumber(record.lossWeight)}g`,
+        `歩留まり率：${formatRecordNumber(record.yieldRate)}%`,
         "",
         `メモ：${record.memo || ""}`
       ].join("\n");
@@ -921,8 +980,8 @@
             <div class="grid menu-grid">
               ${records.map((record) => `
                 <button class="menu-button" type="button" data-type="record-detail" data-id="${record.id}">
-                  <strong>${escapeHtml(record.date || "日付未入力")} ${escapeHtml(record.product || "製品名未入力")}</strong>
-                  <span>${escapeHtml(record.category || "")} / ロット: ${escapeHtml(record.lot || "未入力")} / 判定: ${escapeHtml(record.judgement || "")}</span>
+                  <strong>${escapeHtml(record.date || "日付未入力")} ${escapeHtml(record.recipeName || record.product || "レシピ未入力")}</strong>
+                  <span>${escapeHtml(record.category || "")} / ロット: ${escapeHtml(record.lot || "未入力")} / 包装数: ${escapeHtml(record.packageCount || "0")} / 歩留まり: ${formatRecordNumber(record.yieldRate)}%</span>
                 </button>
               `).join("")}
             </div>
@@ -940,13 +999,18 @@
       }
       app.innerHTML = `
         <section class="section">
-          <h2>${escapeHtml(record.product || "製品名未入力")}</h2>
+          <h2>${escapeHtml(record.recipeName || record.product || "レシピ未入力")}</h2>
           <div class="record-summary">
+            <div>仕込み日：${escapeHtml(record.prepDate || "")}</div>
             <div>製造日：${escapeHtml(record.date || "")}</div>
             <div>製造区分：${escapeHtml(record.category || "")}</div>
+            <div>レシピ名：${escapeHtml(record.recipeName || record.product || "")}</div>
             <div>ロット番号：${escapeHtml(record.lot || "")}</div>
             <div>担当者：${escapeHtml(record.staff || "")}</div>
-            <div>判定：${escapeHtml(record.judgement || "")}</div>
+            <div>成形本数：${escapeHtml(record.moldedCount || "")}</div>
+            <div>包装数：${escapeHtml(record.packageCount || "")}</div>
+            <div>完成重量：${formatRecordNumber(record.finishedWeight)}g</div>
+            <div>歩留まり率：${formatRecordNumber(record.yieldRate)}%</div>
           </div>
           <div class="copy-area">
             <textarea id="recordDetailText" readonly></textarea>
@@ -980,12 +1044,12 @@
     }
 
     function downloadManufacturingRecordsCsv(records) {
-      const headers = ["製造日", "製造区分", "製品名", "ロット番号", "担当者", "6mm肉重量", "3mm肉重量", "肉重量合計", "乳化生地重量", "加熱開始", "加熱終了", "中心温度", "冷却開始", "冷却終了", "冷却後温度", "判定", "完成重量", "包装数", "ロス重量", "歩留まり率", "メモ"];
+      const headers = ["仕込み日", "製造日", "製造区分", "レシピ名", "ロット番号", "担当者", "6mm肉重量", "3mm肉重量", "肉重量合計", "乳化生地重量", "成形本数", "加熱後本数", "包装数", "余り本数", "ロス本数", "完成重量", "ロス重量", "歩留まり率", "メモ"];
       const rows = records.map((record) => [
-        record.date, record.category, record.product, record.lot, record.staff,
-        formatNumber(record.meat6mm), formatNumber(record.meat3mm), formatNumber(record.meatTotal), formatNumber(record.emulsionWeight),
-        record.heatStart, record.heatEnd, record.coreTemp, record.coolStart, record.coolEnd, record.coolTemp, record.judgement,
-        formatNumber(record.finishedWeight), record.packageCount, formatNumber(record.lossWeight), formatNumber(record.yieldRate), record.memo
+        record.prepDate, record.date, record.category, record.recipeName || record.product, record.lot, record.staff,
+        formatRecordNumber(record.meat6mm), formatRecordNumber(record.meat3mm), formatRecordNumber(record.meatTotal), formatRecordNumber(record.emulsionWeight),
+        record.moldedCount, record.heatedCount, record.packageCount, record.leftoverCount, record.lossCount,
+        formatRecordNumber(record.finishedWeight), formatRecordNumber(record.lossWeight), formatRecordNumber(record.yieldRate), record.memo
       ]);
       const csv = [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n");
       const blob = new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" });
@@ -1004,6 +1068,11 @@
     function csvCell(value) {
       const text = value == null ? "" : String(value);
       return `"${text.replace(/"/g, '""')}"`;
+    }
+
+    function formatRecordNumber(value) {
+      const numeric = Number(value);
+      return formatNumber(Number.isFinite(numeric) ? numeric : 0);
     }
 
     function escapeHtml(value) {
