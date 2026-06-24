@@ -258,6 +258,23 @@
       border-radius: var(--radius);
     }
 
+    .meat-info-box {
+      border: 2px solid #9bbcff;
+      background: #f8fbff;
+    }
+
+    .result-subtitle {
+      color: #1d4ed8;
+      font-size: 18px;
+      font-weight: 900;
+    }
+
+    .meat-info-box .result-row:last-child {
+      margin-top: 2px;
+      padding-top: 10px;
+      border-top: 1px dashed #8aa3c7;
+    }
+
     .result-row {
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
@@ -939,7 +956,8 @@
     function meatInfoHtml(meatInfo, unit = "g") {
       if (!meatInfo) return "";
       return `
-        <div class="result-box">
+        <div class="result-box meat-info-box">
+          <div class="result-subtitle">肉重量内訳</div>
           <div class="result-row">
             <div class="result-name">6mm肉重量</div>
             <div class="result-value">${formatNumber(meatInfo.meat6mm)}${unit}</div>
