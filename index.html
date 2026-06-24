@@ -614,6 +614,8 @@
       if (type === "curing") showCuring(id);
       if (type === "emulsion") showEmulsion();
       if (type === "record-new") showManufacturingRecordForm();
+      if (type === "saved-recipe-list") showSavedRecipeList();
+      if (type === "saved-recipe-detail") showSavedRecipeDetail(id);
       if (type === "record-history") showManufacturingRecordHistory();
       if (type === "record-csv") showManufacturingRecordCsv();
       if (type === "record-detail") showManufacturingRecordDetail(id);
@@ -687,6 +689,7 @@
       setHeader("製造記録", "記録・履歴・CSV出力", true, showHome);
       const items = [
         { label: "新規製造記録", description: "製造内容を入力して保存", type: "record-new", id: "new" },
+        { label: "保存済みレシピ確認", description: "保存した計算結果を確認・編集", type: "saved-recipe-list", id: "saved-recipes" },
         { label: "製造記録履歴", description: "保存した記録を確認", type: "record-history", id: "history" },
         { label: "CSV出力", description: "保存済み記録を書き出し", type: "record-csv", id: "csv" }
       ];
@@ -832,7 +835,18 @@
     function loadSavedRecipeCalculations() {
       try {
         const parsed = JSON.parse(localStorage.getItem(SAVED_RECIPE_CALCULATIONS_KEY) || "[]");
-        return Array.isArray(parsed) ? parsed : [];
+        if (!Array.isArray(parsed)) return [];
+        let changed = false;
+        const normalized = parsed.map((record, index) => {
+          if (record.savedRecipeId || record.id) return record;
+          changed = true;
+          const savedRecipeId = `saved-recipe-${record.savedAt || Date.now()}-${index}`;
+          return { ...record, id: savedRecipeId, savedRecipeId };
+        });
+        if (changed) {
+          localStorage.setItem(SAVED_RECIPE_CALCULATIONS_KEY, JSON.stringify(normalized));
+        }
+        return normalized;
       } catch (error) {
         return [];
       }
@@ -841,8 +855,17 @@
     function saveRecipeCalculation(calculation) {
       if (!calculation) return;
       const records = loadSavedRecipeCalculations();
-      records.unshift({ ...calculation, id: `${Date.now()}` });
+      const savedRecipeId = `${Date.now()}`;
+      records.unshift({ ...calculation, id: savedRecipeId, savedRecipeId, memo: calculation.memo || "" });
       localStorage.setItem(SAVED_RECIPE_CALCULATIONS_KEY, JSON.stringify(records));
+    }
+
+    function saveSavedRecipeCalculations(records) {
+      localStorage.setItem(SAVED_RECIPE_CALCULATIONS_KEY, JSON.stringify(records));
+    }
+
+    function savedRecipeRecordId(record) {
+      return record.savedRecipeId || record.id;
     }
 
     function findSavedRecipeCalculation(prepDate, category, recipeName) {
@@ -859,6 +882,158 @@
       const base = `${datePart}-${categoryCode}-${recipeCodeForRecipe(recipe)}`;
       const count = loadManufacturingRecords().filter((record) => String(record.lot || "").startsWith(base)).length;
       return count === 0 ? base : `${base}-${String(count).padStart(2, "0")}`;
+    }
+
+    function showSavedRecipeList(message = "") {
+      setHeader("保存済みレシピ確認", "計算結果の確認・編集", true, showManufacturingRecordTop);
+      const records = loadSavedRecipeCalculations();
+      app.innerHTML = `
+        <section class="section">
+          <h2>保存済みレシピ確認</h2>
+          ${message ? `<div class="status">${escapeHtml(message)}</div>` : ""}
+          ${records.length === 0 ? `<div class="empty">保存済みレシピはまだありません。</div>` : `
+            <div class="grid menu-grid">
+              ${records.map((record) => `
+                <button class="menu-button" type="button" data-type="saved-recipe-detail" data-id="${savedRecipeRecordId(record)}">
+                  <strong>${escapeHtml(record.prepDate || "仕込み日未入力")} ${escapeHtml(record.recipeName || "")}</strong>
+                  <span>${escapeHtml(record.category || "")} / 肉重量合計: ${formatRecordNumber(record.meatTotal)}g / 乳化生地: ${formatRecordNumber(record.emulsionWeight)}g</span>
+                </button>
+              `).join("")}
+            </div>
+          `}
+        </section>
+      `;
+    }
+
+    function showSavedRecipeDetail(savedRecipeId, editMode = false, message = "") {
+      const record = loadSavedRecipeCalculations().find((item) => savedRecipeRecordId(item) === savedRecipeId);
+      setHeader("保存済みレシピ詳細", editMode ? "編集中" : "保存内容", true, showSavedRecipeList);
+      if (!record) {
+        app.innerHTML = `<section class="section"><div class="empty">保存済みレシピが見つかりません。</div></section>`;
+        return;
+      }
+      app.innerHTML = `
+        <section class="section">
+          <h2>${escapeHtml(record.recipeName || "")}</h2>
+          ${message ? `<div class="status">${escapeHtml(message)}</div>` : ""}
+          ${editMode ? savedRecipeEditHtml(record) : savedRecipeReadHtml(record)}
+          <div class="record-actions">
+            ${editMode ? `
+              <button id="savedRecipeSave" class="primary" type="button">保存</button>
+              <button id="savedRecipeCancel" class="secondary" type="button">キャンセル</button>
+            ` : `
+              <button id="savedRecipeEdit" class="primary" type="button">編集</button>
+              <button id="savedRecipeDelete" class="secondary" type="button">削除</button>
+            `}
+          </div>
+          <div id="savedRecipeStatus" class="status"></div>
+        </section>
+      `;
+      if (editMode) {
+        bindSavedRecipeEdit(record);
+      } else {
+        document.getElementById("savedRecipeEdit").addEventListener("click", () => showSavedRecipeDetail(savedRecipeId, true));
+        document.getElementById("savedRecipeDelete").addEventListener("click", () => deleteSavedRecipe(savedRecipeId));
+      }
+    }
+
+    function savedRecipeReadHtml(record) {
+      return `
+        <div class="record-summary">
+          <div>仕込み日：${escapeHtml(record.prepDate || "")}</div>
+          <div>製造区分：${escapeHtml(record.category || "")}</div>
+          <div>レシピ名：${escapeHtml(record.recipeName || "")}</div>
+          <div>6mm肉重量：${formatRecordNumber(record.meat6mm)}g</div>
+          <div>3mm肉重量：${formatRecordNumber(record.meat3mm)}g</div>
+          <div>肉重量合計：${formatRecordNumber(record.meatTotal)}g</div>
+          <div>乳化生地重量：${formatRecordNumber(record.emulsionWeight)}g</div>
+          <div>メモ：${escapeHtml(record.memo || "")}</div>
+        </div>
+        ${meatInfoHtml({ meat6mm: Number(record.meat6mm || 0), meat3mm: Number(record.meat3mm || 0), meatTotal: Number(record.meatTotal || 0) })}
+        ${tableHtml(record.rows || [], Number(record.total || 0))}
+      `;
+    }
+
+    function savedRecipeEditHtml(record) {
+      return `
+        <div class="record-summary">
+          <div>製造区分：${escapeHtml(record.category || "")}</div>
+          <div>レシピ名：${escapeHtml(record.recipeName || "")}</div>
+        </div>
+        <div class="field-row">
+          <label>仕込み日
+            <input id="savedRecipePrepDate" type="date" value="${escapeHtml(record.prepDate || todayString())}">
+          </label>
+          <label>6mm肉重量(g)
+            <input id="savedRecipeMeat6mm" type="number" inputmode="decimal" min="0" step="0.1" value="${Number(record.meat6mm || 0)}">
+          </label>
+          <label>3mm肉重量(g)
+            <input id="savedRecipeMeat3mm" type="number" inputmode="decimal" min="0" step="0.1" value="${Number(record.meat3mm || 0)}">
+          </label>
+          <label>メモ
+            <textarea id="savedRecipeMemo">${escapeHtml(record.memo || "")}</textarea>
+          </label>
+        </div>
+        <div id="savedRecipePreview"></div>
+      `;
+    }
+
+    function bindSavedRecipeEdit(record) {
+      const prepDate = document.getElementById("savedRecipePrepDate");
+      const meat6mm = document.getElementById("savedRecipeMeat6mm");
+      const meat3mm = document.getElementById("savedRecipeMeat3mm");
+      const memo = document.getElementById("savedRecipeMemo");
+      const preview = document.getElementById("savedRecipePreview");
+      const renderPreview = () => {
+        const updated = recalculateSavedRecipe(record, Number(meat6mm.value || 0), Number(meat3mm.value || 0), prepDate.value, memo.value);
+        preview.innerHTML = `${meatInfoHtml({ meat6mm: updated.meat6mm, meat3mm: updated.meat3mm, meatTotal: updated.meatTotal })}${tableHtml(updated.rows, updated.total)}`;
+      };
+      [prepDate, meat6mm, meat3mm, memo].forEach((element) => element.addEventListener("input", renderPreview));
+      document.getElementById("savedRecipeCancel").addEventListener("click", () => showSavedRecipeDetail(savedRecipeRecordId(record)));
+      document.getElementById("savedRecipeSave").addEventListener("click", () => {
+        const updated = recalculateSavedRecipe(record, Number(meat6mm.value || 0), Number(meat3mm.value || 0), prepDate.value, memo.value);
+        const records = loadSavedRecipeCalculations();
+        const index = records.findIndex((item) => savedRecipeRecordId(item) === savedRecipeRecordId(record));
+        if (index >= 0) records[index] = updated;
+        try {
+          saveSavedRecipeCalculations(records);
+          showSavedRecipeDetail(savedRecipeRecordId(record), false, "保存しました");
+        } catch (error) {
+          document.getElementById("savedRecipeStatus").textContent = "保存に失敗しました";
+        }
+      });
+      renderPreview();
+    }
+
+    function recalculateSavedRecipe(record, meat6mmValue, meat3mmValue, prepDate, memo) {
+      const meat6mm = Math.max(Number(meat6mmValue || 0), 0);
+      const meat3mm = Math.max(Number(meat3mmValue || 0), 0);
+      const meatTotal = meat6mm + meat3mm;
+      let rows = [];
+      let emulsionWeight = 0;
+      if (record.recipeKind === "yamanoya") {
+        rows = calculateYamanoya(meatTotal);
+      } else if (record.recipeKind === "gibier") {
+        rows = calculateGibier(meat6mm, meat3mm);
+      } else {
+        const water = meatTotal * 0.2;
+        emulsionWeight = (meatTotal + water) * 0.2;
+        rows = calculateOwnRecipe(record.savedRecipeName || record.recipeName, meatTotal, emulsionWeight, "自動計算");
+      }
+      const total = rows.reduce((sum, row) => sum + row.calculated, 0);
+      return { ...record, prepDate, meat6mm, meat3mm, meatTotal, emulsionWeight, rows, total, memo, updatedAt: new Date().toISOString() };
+    }
+
+    function deleteSavedRecipe(savedRecipeId) {
+      if (!confirm("この保存済みレシピを削除しますか？この操作は元に戻せません。")) return;
+      const records = loadSavedRecipeCalculations().filter((record) => savedRecipeRecordId(record) !== savedRecipeId);
+      try {
+        saveSavedRecipeCalculations(records);
+        showSavedRecipeList("削除しました");
+      } catch (error) {
+        const status = document.getElementById("savedRecipeStatus");
+        if (status) status.textContent = "削除に失敗しました";
+      }
     }
 
     function bindManufacturingRecordForm() {
@@ -914,12 +1089,17 @@
       document.getElementById("recordSave").addEventListener("click", () => {
         const record = collectManufacturingRecord(elements);
         record.id = `${Date.now()}`;
+        record.manufacturingRecordId = record.id;
         record.savedAt = new Date().toISOString();
         const records = loadManufacturingRecords();
         records.unshift(record);
-        saveManufacturingRecords(records);
-        goodNotesText.value = buildManufacturingRecordText(record);
-        status.textContent = "製造記録を保存しました";
+        try {
+          saveManufacturingRecords(records);
+          goodNotesText.value = buildManufacturingRecordText(record);
+          status.textContent = "保存しました";
+        } catch (error) {
+          status.textContent = "保存に失敗しました";
+        }
       });
       render();
     }
@@ -1001,7 +1181,18 @@
     function loadManufacturingRecords() {
       try {
         const parsed = JSON.parse(localStorage.getItem(MANUFACTURING_RECORDS_KEY) || "[]");
-        return Array.isArray(parsed) ? parsed : [];
+        if (!Array.isArray(parsed)) return [];
+        let changed = false;
+        const normalized = parsed.map((record, index) => {
+          if (record.manufacturingRecordId || record.id) return record;
+          changed = true;
+          const manufacturingRecordId = `manufacturing-record-${record.savedAt || Date.now()}-${index}`;
+          return { ...record, id: manufacturingRecordId, manufacturingRecordId };
+        });
+        if (changed) {
+          localStorage.setItem(MANUFACTURING_RECORDS_KEY, JSON.stringify(normalized));
+        }
+        return normalized;
       } catch (error) {
         return [];
       }
@@ -1011,18 +1202,23 @@
       localStorage.setItem(MANUFACTURING_RECORDS_KEY, JSON.stringify(records));
     }
 
-    function showManufacturingRecordHistory(backHandler = showManufacturingRecordTop) {
+    function manufacturingRecordId(record) {
+      return record.manufacturingRecordId || record.id;
+    }
+
+    function showManufacturingRecordHistory(backHandler = showManufacturingRecordTop, message = "") {
       setHeader("製造記録履歴", "保存した記録", true, backHandler);
       const records = loadManufacturingRecords();
       app.innerHTML = `
         <section class="section">
           <h2>製造記録履歴</h2>
+          ${message ? `<div class="status">${escapeHtml(message)}</div>` : ""}
           ${records.length === 0 ? `<div class="empty">保存された製造記録はまだありません。</div>` : `
             <div class="grid menu-grid">
               ${records.map((record) => `
-                <button class="menu-button" type="button" data-type="record-detail" data-id="${record.id}">
+                <button class="menu-button" type="button" data-type="record-detail" data-id="${manufacturingRecordId(record)}">
                   <strong>${escapeHtml(record.date || "日付未入力")} ${escapeHtml(record.recipeName || record.product || "レシピ未入力")}</strong>
-                  <span>${escapeHtml(record.category || "")} / ロット: ${escapeHtml(record.lot || "未入力")} / ${escapeHtml(record.packageCountLabel || "包装数")}: ${escapeHtml(record.packageCount || "0")} / 歩留まり: ${record.yieldRate == null ? `${record.unitWeightLabel || "1パック重量"}未設定` : `${formatRecordNumber(record.yieldRate)}%`}</span>
+                  <span>仕込み日: ${escapeHtml(record.prepDate || "")} / ${escapeHtml(record.category || "")} / ロット: ${escapeHtml(record.lot || "未入力")} / ${escapeHtml(record.packageCountLabel || "包装数")}: ${escapeHtml(record.packageCount || "0")} / ロス本数: ${escapeHtml(record.lossCount || "0")} / 歩留まり: ${record.yieldRate == null ? `${record.unitWeightLabel || "1パック重量"}未設定` : `${formatRecordNumber(record.yieldRate)}%`}</span>
                 </button>
               `).join("")}
             </div>
@@ -1031,9 +1227,9 @@
       `;
     }
 
-    function showManufacturingRecordDetail(recordId) {
-      const record = loadManufacturingRecords().find((item) => item.id === recordId);
-      setHeader("製造記録詳細", "保存内容", true, showManufacturingRecordHistory);
+    function showManufacturingRecordDetail(recordId, editMode = false, message = "") {
+      const record = loadManufacturingRecords().find((item) => manufacturingRecordId(item) === recordId);
+      setHeader("製造記録詳細", editMode ? "編集中" : "保存内容", true, showManufacturingRecordHistory);
       if (!record) {
         app.innerHTML = `<section class="section"><div class="empty">製造記録が見つかりません。</div></section>`;
         return;
@@ -1041,31 +1237,164 @@
       app.innerHTML = `
         <section class="section">
           <h2>${escapeHtml(record.recipeName || record.product || "レシピ未入力")}</h2>
-          <div class="record-summary">
-            <div>仕込み日：${escapeHtml(record.prepDate || "")}</div>
-            <div>製造日：${escapeHtml(record.date || "")}</div>
-            <div>製造区分：${escapeHtml(record.category || "")}</div>
-            <div>レシピ名：${escapeHtml(record.recipeName || record.product || "")}</div>
-            <div>ロット番号：${escapeHtml(record.lot || "")}</div>
-            <div>${escapeHtml(record.packageCountLabel || "包装数")}：${escapeHtml(record.packageCount || "")}</div>
-            <div>ロス本数：${escapeHtml(record.lossCount || "")}</div>
-            <div>完成重量：${record.finishedWeight == null ? `${record.unitWeightLabel || "1パック重量"}未設定` : `${formatRecordNumber(record.finishedWeight)}g`}</div>
-            <div>歩留まり率：${record.yieldRate == null ? `${record.unitWeightLabel || "1パック重量"}未設定` : `${formatRecordNumber(record.yieldRate)}%`}</div>
-          </div>
+          ${message ? `<div class="status">${escapeHtml(message)}</div>` : ""}
+          ${editMode ? manufacturingRecordEditHtml(record) : manufacturingRecordReadHtml(record)}
           ${record.recipeRows && record.recipeRows.length ? meatInfoHtml({ meat6mm: Number(record.meat6mm || 0), meat3mm: Number(record.meat3mm || 0), meatTotal: Number(record.meatTotal || 0) }) + tableHtml(record.recipeRows, Number(record.recipeTotal || 0)) : ""}
           <div class="copy-area">
             <textarea id="recordDetailText" readonly></textarea>
             <div class="record-actions">
-              <button id="recordDetailCopy" class="primary" type="button">GoodNotes用にコピー</button>
+              ${editMode ? `
+                <button id="recordEditSave" class="primary" type="button">保存</button>
+                <button id="recordEditCancel" class="secondary" type="button">キャンセル</button>
+              ` : `
+                <button id="recordDetailCopy" class="primary" type="button">GoodNotes用にコピー</button>
+                <button id="recordDetailEdit" class="secondary" type="button">編集</button>
+                <button id="recordDetailDelete" class="secondary" type="button">削除</button>
+              `}
             </div>
             <div id="recordDetailStatus" class="status"></div>
           </div>
         </section>
       `;
       document.getElementById("recordDetailText").value = buildManufacturingRecordText(record);
-      document.getElementById("recordDetailCopy").addEventListener("click", () => {
-        copyToClipboard(document.getElementById("recordDetailText").value, document.getElementById("recordDetailStatus"));
+      if (editMode) {
+        bindManufacturingRecordEdit(record);
+      } else {
+        document.getElementById("recordDetailCopy").addEventListener("click", () => {
+          copyToClipboard(document.getElementById("recordDetailText").value, document.getElementById("recordDetailStatus"));
+        });
+        document.getElementById("recordDetailEdit").addEventListener("click", () => showManufacturingRecordDetail(manufacturingRecordId(record), true));
+        document.getElementById("recordDetailDelete").addEventListener("click", () => deleteManufacturingRecord(manufacturingRecordId(record)));
+      }
+    }
+
+    function manufacturingRecordReadHtml(record) {
+      return `
+        <div class="record-summary">
+          <div>仕込み日：${escapeHtml(record.prepDate || "")}</div>
+          <div>製造日：${escapeHtml(record.date || "")}</div>
+          <div>製造区分：${escapeHtml(record.category || "")}</div>
+          <div>レシピ名：${escapeHtml(record.recipeName || record.product || "")}</div>
+          <div>ロット番号：${escapeHtml(record.lot || "")}</div>
+          <div>6mm肉重量：${formatRecordNumber(record.meat6mm)}g</div>
+          <div>3mm肉重量：${formatRecordNumber(record.meat3mm)}g</div>
+          <div>肉重量合計：${formatRecordNumber(record.meatTotal)}g</div>
+          <div>乳化生地重量：${formatRecordNumber(record.emulsionWeight)}g</div>
+          <div>${escapeHtml(record.packageCountLabel || "包装数")}：${escapeHtml(record.packageCount || "")}</div>
+          <div>ロス本数：${escapeHtml(record.lossCount || "")}</div>
+          <div>${escapeHtml(record.unitWeightLabel || "1パック重量")}：${record.packWeight == null ? "未設定" : `${formatRecordNumber(record.packWeight)}g`}</div>
+          <div>完成重量：${record.finishedWeight == null ? `${record.unitWeightLabel || "1パック重量"}未設定` : `${formatRecordNumber(record.finishedWeight)}g`}</div>
+          <div>歩留まり率：${record.yieldRate == null ? `${record.unitWeightLabel || "1パック重量"}未設定` : `${formatRecordNumber(record.yieldRate)}%`}</div>
+          <div>メモ：${escapeHtml(record.memo || "")}</div>
+        </div>
+      `;
+    }
+
+    function manufacturingRecordEditHtml(record) {
+      return `
+        <div class="record-summary">
+          <div>製造区分：${escapeHtml(record.category || "")}</div>
+          <div>レシピ名：${escapeHtml(record.recipeName || "")}</div>
+        </div>
+        <div class="field-row">
+          <label>仕込み日
+            <input id="editRecordPrepDate" type="date" value="${escapeHtml(record.prepDate || todayString())}">
+          </label>
+          <label>製造日
+            <input id="editRecordDate" type="date" value="${escapeHtml(record.date || todayString())}">
+          </label>
+          <label>${escapeHtml(record.packageCountLabel || "包装数")}
+            <input id="editRecordPackageCount" type="number" inputmode="numeric" min="0" step="1" value="${escapeHtml(record.packageCount || "0")}">
+          </label>
+          <label>ロス本数
+            <input id="editRecordLossCount" type="number" inputmode="numeric" min="0" step="1" value="${escapeHtml(record.lossCount || "0")}">
+          </label>
+          <label>メモ
+            <textarea id="editRecordMemo">${escapeHtml(record.memo || "")}</textarea>
+          </label>
+        </div>
+        <div id="recordEditPreview"></div>
+      `;
+    }
+
+    function bindManufacturingRecordEdit(record) {
+      const prepDate = document.getElementById("editRecordPrepDate");
+      const date = document.getElementById("editRecordDate");
+      const packageCount = document.getElementById("editRecordPackageCount");
+      const lossCount = document.getElementById("editRecordLossCount");
+      const memo = document.getElementById("editRecordMemo");
+      const preview = document.getElementById("recordEditPreview");
+      const renderPreview = () => {
+        const updated = recalculateManufacturingRecord(record, prepDate.value, date.value, packageCount.value, lossCount.value, memo.value);
+        preview.innerHTML = manufacturingRecordReadHtml(updated);
+        document.getElementById("recordDetailText").value = buildManufacturingRecordText(updated);
+      };
+      [prepDate, date, packageCount, lossCount, memo].forEach((element) => element.addEventListener("input", renderPreview));
+      document.getElementById("recordEditCancel").addEventListener("click", () => showManufacturingRecordDetail(manufacturingRecordId(record)));
+      document.getElementById("recordEditSave").addEventListener("click", () => {
+        const updated = recalculateManufacturingRecord(record, prepDate.value, date.value, packageCount.value, lossCount.value, memo.value);
+        const records = loadManufacturingRecords();
+        const index = records.findIndex((item) => manufacturingRecordId(item) === manufacturingRecordId(record));
+        if (index >= 0) records[index] = updated;
+        try {
+          saveManufacturingRecords(records);
+          showManufacturingRecordDetail(manufacturingRecordId(record), false, "保存しました");
+        } catch (error) {
+          document.getElementById("recordDetailStatus").textContent = "保存に失敗しました";
+        }
       });
+      renderPreview();
+    }
+
+    function recalculateManufacturingRecord(record, prepDate, date, packageCount, lossCount, memo) {
+      const count = Number(packageCount || 0);
+      const packWeight = record.packWeight == null ? null : Number(record.packWeight);
+      const finishedWeight = packWeight == null ? null : count * packWeight;
+      const meatTotal = Number(record.meatTotal || 0);
+      const yieldRate = finishedWeight == null || meatTotal <= 0 ? null : finishedWeight / meatTotal * 100;
+      return {
+        ...record,
+        prepDate,
+        date,
+        lot: generateLotFromExistingRecord(record, date),
+        packageCount,
+        lossCount,
+        memo,
+        finishedWeight,
+        yieldRate,
+        updatedAt: new Date().toISOString()
+      };
+    }
+
+    function generateLotFromExistingRecord(record, date) {
+      const code = record.recipeCode || recipeCodeFromRecord(record);
+      const datePart = (date || todayString()).replace(/-/g, "");
+      const categoryCode = record.category === "自社レシピ" ? "JI" : "IT";
+      const base = `${datePart}-${categoryCode}-${code}`;
+      return String(record.lot || "").startsWith(base) ? record.lot : base;
+    }
+
+    function recipeCodeFromRecord(record) {
+      if (record.packagingKey === "arabiki" || record.recipeName === "あらびき") return "ARABIKI";
+      if (record.packagingKey === "cheese" || record.recipeName === "チーズ") return "CHEESE";
+      if (record.packagingKey === "herbProduct" || record.packagingKey === "herbEvent" || String(record.recipeName || "").includes("ハーブ")) return "HERB";
+      if (record.packagingKey === "chorizo" || record.recipeName === "チョリソー") return "CHORIZO";
+      if (String(record.recipeName || "").includes("山小屋")) return "YAMAGOYA";
+      if (String(record.recipeName || "").includes("ジビエ")) return "GIBIER";
+      if (String(record.recipeName || "").includes("峠")) return "TOUGE";
+      return "RECIPE";
+    }
+
+    function deleteManufacturingRecord(recordId) {
+      if (!confirm("この製造記録を削除しますか？この操作は元に戻せません。")) return;
+      const records = loadManufacturingRecords().filter((record) => manufacturingRecordId(record) !== recordId);
+      try {
+        saveManufacturingRecords(records);
+        showManufacturingRecordHistory(showManufacturingRecordTop, "削除しました");
+      } catch (error) {
+        const status = document.getElementById("recordDetailStatus");
+        if (status) status.textContent = "削除に失敗しました";
+      }
     }
 
     function showManufacturingRecordCsv() {
@@ -1289,6 +1618,7 @@
           prepDate: productionDateInput.value,
           category: recipeRecordCategory(recipe),
           recipeName: recordRecipeDisplayName(recipe),
+          savedRecipeName: recipe.baseRecipeName || recipe.name,
           recipeCode: recipeCodeForRecipe(recipe),
           recipeKind: recipe.kind,
           meat6mm,
@@ -1311,8 +1641,12 @@
       if (splitSelect) splitSelect.addEventListener("change", render);
       copyButton.addEventListener("click", () => copyToClipboard(copyText.value, status));
       saveCalcButton.addEventListener("click", () => {
-        saveRecipeCalculation(latestCalculation);
-        status.textContent = "計算結果を保存しました";
+        try {
+          saveRecipeCalculation(latestCalculation);
+          status.textContent = "計算結果を保存しました";
+        } catch (error) {
+          status.textContent = "保存に失敗しました";
+        }
       });
       render();
     }
@@ -1369,6 +1703,7 @@
           prepDate: productionDateInput.value,
           category: "委託製造",
           recipeName: recordRecipeDisplayName(recipe),
+          savedRecipeName: recordRecipeDisplayName(recipe),
           recipeCode: recipeCodeForRecipe(recipe),
           recipeKind: recipe.kind,
           meat6mm: deer,
@@ -1386,8 +1721,12 @@
       porkInput.addEventListener("input", render);
       copyButton.addEventListener("click", () => copyToClipboard(copyText.value, status));
       saveCalcButton.addEventListener("click", () => {
-        saveRecipeCalculation(latestCalculation);
-        status.textContent = "計算結果を保存しました";
+        try {
+          saveRecipeCalculation(latestCalculation);
+          status.textContent = "計算結果を保存しました";
+        } catch (error) {
+          status.textContent = "保存に失敗しました";
+        }
       });
       render();
     }
