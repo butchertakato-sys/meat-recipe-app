@@ -1,362 +1,1416 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>食肉加工 配合・製造管理アプリ Ver3</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>食肉加工 配合・製造管理</title>
   <style>
     :root {
-      --bg: #f7f4ef;
-      --card: #ffffff;
-      --text: #222;
-      --muted: #666;
-      --accent: #8b2f2f;
-      --accent2: #f1dfd7;
-      --border: #ddd;
-      --good: #276749;
+      --bg: #ffffff;
+      --panel: #ffffff;
+      --ink: #1f2937;
+      --muted: #5f6b7a;
+      --line: #e5e7eb;
+      --brand: #14532d;
+      --brand-dark: #123c24;
+      --accent: #9f2f22;
+      --soft: #f5f5f5;
+      --warn: #fff7ed;
+      --shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+      --radius: 16px;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
-    * { box-sizing: border-box; }
+
+    * {
+      box-sizing: border-box;
+    }
+
     body {
       margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      min-height: 100vh;
       background: var(--bg);
-      color: var(--text);
-      line-height: 1.5;
+      color: var(--ink);
+      font-size: 19px;
+      line-height: 1.55;
+      writing-mode: horizontal-tb;
     }
-    header {
-      position: sticky;
-      top: 0;
-      z-index: 5;
-      background: var(--accent);
-      color: #fff;
-      padding: 14px 16px;
-      box-shadow: 0 2px 8px rgba(0,0,0,.18);
+
+    button,
+    input,
+    select,
+    textarea {
+      font: inherit;
     }
-    header h1 { margin: 0; font-size: 20px; }
-    header p { margin: 3px 0 0; font-size: 12px; opacity: .9; }
-    main { max-width: 900px; margin: 0 auto; padding: 16px; }
-    .section { display: none; }
-    .section.active { display: block; }
-    .grid { display: grid; gap: 14px; }
-    @media (min-width: 700px) { .menu-grid { grid-template-columns: repeat(2, 1fr); } }
-    .card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 16px;
-      box-shadow: 0 2px 8px rgba(0,0,0,.05);
-    }
-    .menu-button, button, select, input {
+
+    button {
       width: 100%;
-      min-height: 52px;
-      font-size: 18px;
-      border-radius: 12px;
-      border: 1px solid var(--border);
-      padding: 10px 12px;
-      background: #fff;
-    }
-    .menu-button, button {
-      background: var(--accent);
-      color: #fff;
-      border: none;
-      font-weight: 700;
+      min-height: 56px;
+      border: 0;
+      border-radius: var(--radius);
       cursor: pointer;
       touch-action: manipulation;
     }
-    .secondary { background: #555; }
-    .ghost { background: #fff; color: var(--accent); border: 2px solid var(--accent); }
-    .disabled { background: #aaa; color: #fff; }
-    label { display: block; font-weight: 700; margin: 14px 0 6px; }
-    .row { display: grid; grid-template-columns: 1fr; gap: 12px; }
-    @media (min-width: 700px) { .row.two { grid-template-columns: 1fr 1fr; } }
-    .result {
-      margin-top: 16px;
+
+    input,
+    select,
+    textarea {
+      width: 100%;
+      min-height: 56px;
+      border: 2px solid var(--line);
+      border-radius: 12px;
+      padding: 14px 16px;
       background: #fff;
-      border-radius: 14px;
-      border: 1px solid var(--border);
+      color: var(--ink);
+      font-size: 20px;
+    }
+
+    textarea {
+      min-height: 160px;
+      resize: vertical;
+    }
+
+    .app {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+      align-items: center;
+      width: min(700px, 100%);
+      margin: 0 auto;
+      padding: calc(16px + env(safe-area-inset-top)) 16px 14px;
+      background: #ffffff;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .topbar.has-back {
+      grid-template-columns: 56px 1fr;
+    }
+
+    .back {
+      display: none;
+      background: var(--panel);
+      border: 2px solid var(--line);
+      color: var(--ink);
+      font-size: 26px;
+      font-weight: 800;
+    }
+
+    .topbar.has-back .back {
+      display: block;
+    }
+
+    .title {
+      min-width: 0;
+      writing-mode: horizontal-tb;
+    }
+
+    .title h1 {
+      margin: 0;
+      font-size: clamp(22px, 4vw, 30px);
+      line-height: 1.2;
+      letter-spacing: 0;
+      white-space: normal;
+    }
+
+    .title p {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    main {
+      width: min(700px, 100%);
+      margin: 0 auto;
+      padding: 18px 16px calc(36px + env(safe-area-inset-bottom));
+    }
+
+    .grid {
+      display: grid;
+      gap: 14px;
+    }
+
+    .menu-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .home-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      align-items: stretch;
+    }
+
+    .menu-button {
+      display: flex;
+      min-height: 88px;
+      height: 100%;
+      flex-direction: column;
+      align-items: flex-start;
+      justify-content: center;
+      gap: 6px;
+      padding: 18px 20px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      color: var(--ink);
+      text-align: left;
+    }
+
+    .menu-button strong {
+      font-size: 23px;
+      line-height: 1.25;
+    }
+
+    .menu-button span {
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .primary {
+      background: var(--brand);
+      color: #fff;
+      font-weight: 800;
+    }
+
+    .secondary {
+      background: var(--panel);
+      border: 2px solid var(--line);
+      color: var(--ink);
+      font-weight: 700;
+    }
+
+    .section {
+      margin-bottom: 18px;
+      padding: 18px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow-x: hidden;
+    }
+
+    .section h2,
+    .section h3 {
+      margin: 0 0 12px;
+      line-height: 1.25;
+    }
+
+    .section h2 {
+      font-size: 26px;
+    }
+
+    .section h3 {
+      font-size: 22px;
+    }
+
+    .field-row {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 14px;
+      align-items: end;
+      margin-bottom: 12px;
+    }
+
+    .radio-group {
+      display: grid;
+      gap: 8px;
+      padding: 10px 0;
+    }
+
+    .radio-option {
+      min-height: 50px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      border: 2px solid var(--line);
+      border-radius: var(--radius);
+      color: var(--ink);
+      font-weight: 800;
+    }
+
+    .radio-option input {
+      width: 24px;
+      min-height: 24px;
+      height: 24px;
+      margin: 0;
+      padding: 0;
+    }
+
+    label {
+      display: grid;
+      gap: 6px;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .result-box {
+      display: grid;
+      gap: 10px;
+      margin-top: 14px;
+      padding: 16px;
+      background: var(--soft);
+      border-radius: var(--radius);
+    }
+
+    .result-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 6px 12px;
+      align-items: baseline;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .result-row:last-child {
+      padding-bottom: 0;
+      border-bottom: 0;
+    }
+
+    .result-name {
+      min-width: 0;
+      font-weight: 800;
+      overflow-wrap: anywhere;
+    }
+
+    .result-formula {
+      grid-column: 1 / -1;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .result-value {
+      font-size: 25px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+
+    .product-name {
+      margin: 2px 0 16px;
+      padding: 14px 16px;
+      background: var(--soft);
+      border-radius: var(--radius);
+      font-size: 24px;
+      font-weight: 900;
+    }
+
+    .note {
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .tabbar {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+
+    .tab {
+      min-height: 54px;
+      background: #fff;
+      border: 2px solid var(--line);
+      color: var(--ink);
+      font-weight: 800;
+    }
+
+    .tab.active {
+      background: var(--brand);
+      border-color: var(--brand);
+      color: #fff;
+    }
+
+    details {
+      border: 2px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
       overflow: hidden;
     }
-    .result h3 { margin: 0; padding: 12px 14px; background: var(--accent2); }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { padding: 12px; border-top: 1px solid var(--border); text-align: left; }
-    td:last-child, th:last-child { text-align: right; font-weight: 700; }
-    .note { color: var(--muted); font-size: 14px; margin-top: 8px; }
-    .pill { display:inline-block; padding:4px 10px; border-radius:999px; background:var(--accent2); color:var(--accent); font-weight:700; font-size:13px; }
-    .copyBox {
-      width: 100%;
-      min-height: 180px;
-      margin-top: 12px;
-      font-size: 16px;
-      border-radius: 12px;
-      border: 1px solid var(--border);
-      padding: 12px;
-      white-space: pre-wrap;
+
+    summary {
+      min-height: 56px;
+      display: flex;
+      align-items: center;
+      padding: 12px 14px;
+      font-size: 21px;
+      font-weight: 800;
+      cursor: pointer;
+      touch-action: manipulation;
     }
-    .topbar { display:flex; gap:10px; align-items:center; margin-bottom:14px; }
-    .topbar button { width:auto; min-height:44px; font-size:16px; padding:8px 14px; }
+
+    details .details-body {
+      padding: 0 14px 14px;
+    }
+
+    .spec-list {
+      display: grid;
+      gap: 10px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .spec-list li {
+      padding: 12px;
+      background: var(--soft);
+      border-radius: var(--radius);
+    }
+
+    .copy-area {
+      display: grid;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .status {
+      min-height: 28px;
+      color: var(--brand-dark);
+      font-weight: 800;
+    }
+
+    .empty {
+      padding: 20px;
+      background: var(--warn);
+      border-radius: var(--radius);
+      font-weight: 700;
+    }
+
+    @media (max-width: 620px) {
+      body {
+        font-size: 18px;
+      }
+
+      main {
+        padding-left: 10px;
+        padding-right: 10px;
+      }
+
+      .section {
+        padding: 16px;
+      }
+
+      .menu-button {
+        min-height: 82px;
+      }
+
+      .home-grid {
+        grid-template-columns: 1fr;
+      }
+    }
   </style>
 </head>
 <body>
-  <header>
-    <h1>食肉加工 配合・製造管理アプリ Ver3</h1>
-    <p>製品レシピ・乳化生地・熟成管理 / iPhone・iPad・Windows対応</p>
-  </header>
-
-  <main>
-    <section id="home" class="section active">
-      <div class="grid menu-grid">
-        <div class="card">
-          <h2>製品レシピ計算</h2>
-          <p class="note">ソーセージ4種の配合を計算します。</p>
-          <button class="menu-button" onclick="showSection('product')">開く</button>
-        </div>
-        <div class="card">
-          <h2>乳化生地計算</h2>
-          <p class="note">ソーセージ生地の元になる乳化生地を計算します。</p>
-          <button class="menu-button" onclick="showSection('emulsion')">開く</button>
-        </div>
-        <div class="card">
-          <h2>熟成管理</h2>
-          <p class="note">ベーコン7日、生ハム12か月/18か月の予定日を計算します。</p>
-          <button class="menu-button" onclick="showSection('aging')">開く</button>
-        </div>
-        <div class="card">
-          <h2>製造記録</h2>
-          <p class="note">製造日、ロット、歩留まり、加熱温度などを将来追加予定。</p>
-          <button class="menu-button disabled" onclick="alert('将来実装予定です')">将来実装</button>
-        </div>
-        <div class="card">
-          <h2>履歴一覧</h2>
-          <p class="note">製造履歴保存、検索、CSV/Excel出力を将来追加予定。</p>
-          <button class="menu-button disabled" onclick="alert('将来実装予定です')">将来実装</button>
-        </div>
+  <div class="app">
+    <header id="topbar" class="topbar">
+      <button id="backButton" class="back" type="button" aria-label="戻る">←</button>
+      <div class="title">
+        <h1 id="screenTitle">食肉加工 配合・製造管理</h1>
+        <p id="screenSubtitle">単体HTML / iPad・iPhone・Windows共通</p>
       </div>
-    </section>
+    </header>
+    <main id="app"></main>
+  </div>
 
-    <section id="product" class="section">
-      <div class="topbar"><button class="secondary" onclick="showSection('home')">← トップへ</button><span class="pill">製品レシピ計算</span></div>
-      <div class="card">
-        <label>レシピ</label>
-        <select id="productRecipe" onchange="renderProductInputs(); calcProduct();"></select>
-        <label>肉重量(g)</label>
-        <input id="meatWeight" type="number" inputmode="decimal" placeholder="例：3000" oninput="calcProduct()" />
-        <label>乳化生地モード</label>
-        <select id="emulsionMode" onchange="renderProductInputs(); calcProduct();">
-          <option value="auto">乳化生地自動計算</option>
-          <option value="manual">乳化生地手入力</option>
-        </select>
-        <div id="manualEmulsionWrap"></div>
-        <div id="productResult" class="result"></div>
-        <button class="ghost" onclick="copyCurrent('product')">GoodNotes転記用コピー</button>
-      </div>
-    </section>
+  <script>
+    /*
+      開発用メモ: 肉重量1000g時の期待値
+      あらびき: 水200g, 乳化生地240g(自動), 塩19.2g, ウインナーヘラマント7.2g, ヘラビンE3.6g, ペルビナールHH1.2g
+      チーズ: 水200g, 乳化生地240g(自動), 塩19.2g, ウインナーヘラマント7.2g, ヘラビンE3.6g, ペルビナールHH1.2g, チーズ144g
+      ハーブ: 水200g, 乳化生地240g(自動), 塩19.2g, ブラートブルストD7.2g, ヘラビンE3.6g, ペルビナールHH1.2g, マジョラム1.44g, バジル0.72g, オレガノ0.72g
+      チョリソー: 水200g, 乳化生地240g(自動), 塩19.2g, ヘラビンE3.6g, ペルビナールHH1.2g, チョリソースパイス17.28g, 唐辛子2.88g
+      山小屋: 背脂160g, 水232g, 塩22.272g, スパイス22.272g, ヘラビンE4.176g, ペルビナールHH1.392g
+      ベーコン: 豚バラ肉1000g, 塩25g, 三温糖6.25g
+      生ハム: 骨付きもも肉1000g, 塩100g
+      乳化生地/豚肉のみ: 肉1000g, 豚脂333.3333333333g, 氷333.3333333333g, 塩26.6666666667g, ヘラビンE5g, ペルビナールHH1.6666666667g
+      乳化生地/豚肉+豚脂: 豚肉+豚脂1000g, 氷250g, 塩20g, ヘラビンE3.75g, ペルビナールHH1.25g
+    */
 
-    <section id="emulsion" class="section">
-      <div class="topbar"><button class="secondary" onclick="showSection('home')">← トップへ</button><span class="pill">乳化生地計算</span></div>
-      <div class="card">
-        <label>乳化生地タイプ</label>
-        <select id="emulsionType" onchange="renderEmulsionInputs(); calcEmulsion();">
-          <option value="porkOnly">豚肉のみ</option>
-          <option value="porkFatMix">豚肉＋豚脂</option>
-        </select>
-        <div id="emulsionInputs"></div>
-        <div id="emulsionResult" class="result"></div>
-        <button class="ghost" onclick="copyCurrent('emulsion')">GoodNotes転記用コピー</button>
-      </div>
-    </section>
+    const appState = {
+      activeClientTab: "calc"
+    };
 
-    <section id="aging" class="section">
-      <div class="topbar"><button class="secondary" onclick="showSection('home')">← トップへ</button><span class="pill">熟成管理</span></div>
-      <div class="card">
-        <label>管理項目</label>
-        <select id="agingType" onchange="renderAgingInputs(); calcAging();">
-          <option value="bacon">ベーコン</option>
-          <option value="prosciutto">生ハム</option>
-        </select>
-        <div id="agingInputs"></div>
-        <div id="agingResult" class="result"></div>
-        <button class="ghost" onclick="copyCurrent('aging')">GoodNotes転記用コピー</button>
-      </div>
-    </section>
-  </main>
+    const ownRecipes = {
+      arabiki: { name: "あらびき", description: "自社レシピ", kind: "own" },
+      cheese: { name: "チーズ", description: "自社レシピ", kind: "own" },
+      herb: { name: "ハーブ", description: "自社レシピ", kind: "own" },
+      chorizo: { name: "チョリソー", description: "自社レシピ", kind: "own" }
+    };
 
-<script>
-const recipes = {
-  arabiki: {
-    name: 'あらびき', waterRate: 0.2, emulsionAutoRate: 0.2,
-    items: [
-      { name:'水', calc: c => c.meat * 0.2 },
-      { name:'乳化生地', calc: c => c.emulsion },
-      { name:'塩', calc: c => (c.meat + c.water) * 0.016 },
-      { name:'ウインナーヘラマント', calc: c => (c.meat + c.water + c.emulsion) * 0.005 },
-      { name:'ヘラビンE', calc: c => (c.meat + c.water) * 0.003 },
-      { name:'ペルビナールHH', calc: c => (c.meat + c.water) * 0.001 },
-    ]
-  },
-  cheese: {
-    name: 'チーズ', waterRate: 0.2, emulsionAutoRate: 0.2,
-    items: [
-      { name:'水', calc: c => c.meat * 0.2 },
-      { name:'乳化生地', calc: c => c.emulsion },
-      { name:'塩', calc: c => (c.meat + c.water) * 0.016 },
-      { name:'ウインナーヘラマント', calc: c => (c.meat + c.water + c.emulsion) * 0.005 },
-      { name:'ヘラビンE', calc: c => (c.meat + c.water) * 0.003 },
-      { name:'ペルビナールHH', calc: c => (c.meat + c.water) * 0.001 },
-      { name:'チーズ', calc: c => (c.meat + c.water + c.emulsion) * 0.10 },
-    ]
-  },
-  herb: {
-    name: 'ハーブ', waterRate: 0.2, emulsionAutoRate: 0.2,
-    items: [
-      { name:'水', calc: c => c.meat * 0.2 },
-      { name:'乳化生地', calc: c => c.emulsion },
-      { name:'塩', calc: c => (c.meat + c.water) * 0.016 },
-      { name:'ブラートブルストD', calc: c => (c.meat + c.water + c.emulsion) * 0.005 },
-      { name:'ヘラビンE', calc: c => (c.meat + c.water) * 0.003 },
-      { name:'ペルビナールHH', calc: c => (c.meat + c.water) * 0.001 },
-      { name:'マジョラム', calc: c => (c.meat + c.water + c.emulsion) * 0.001 },
-      { name:'バジル', calc: c => (c.meat + c.water + c.emulsion) * 0.0005 },
-      { name:'オレガノ', calc: c => (c.meat + c.water + c.emulsion) * 0.0005 },
-    ]
-  },
-  chorizo: {
-    name: 'チョリソー', waterRate: 0.2, emulsionAutoRate: 0.2,
-    items: [
-      { name:'水', calc: c => c.meat * 0.2 },
-      { name:'乳化生地', calc: c => c.emulsion },
-      { name:'塩', calc: c => (c.meat + c.water) * 0.016 },
-      { name:'ヘラビンE', calc: c => (c.meat + c.water) * 0.003 },
-      { name:'ペルビナールHH', calc: c => (c.meat + c.water) * 0.001 },
-      { name:'チョリソースパイス', calc: c => (c.meat + c.water + c.emulsion) * 0.012 },
-      { name:'唐辛子', calc: c => (c.meat + c.water + c.emulsion) * 0.002 },
-    ]
-  }
-};
+    const outsourceClients = {
+      yamanoya: {
+        name: "山小屋",
+        description: "スパイスソーセージ",
+        recipe: { name: "山小屋 スパイスソーセージ", kind: "yamanoya" },
+        specs: ["商品名: スパイスソーセージ", "長さ: 17cm", "ケーシング: 羊腸22-24", "規格袋: 22-33", "1袋あたり: 7～8本"],
+        spiceMix: [
+          { name: "ホワイトペッパー", amount: 132 },
+          { name: "コリアンダー", amount: 80 },
+          { name: "クローブ", amount: 20 },
+          { name: "クミン", amount: 20 },
+          { name: "ナツメグ", amount: 6 },
+          { name: "ガーリック", amount: 6 },
+          { name: "シナモン", amount: 4 },
+          { name: "ブドウ糖", amount: 66 }
+        ]
+      },
+      gibier: {
+        name: "ジビエセンター",
+        description: "鹿ソーセージ",
+        recipe: { name: "ジビエセンター 鹿ソーセージ", productName: "鹿ソーセージ", kind: "gibier" },
+        specs: ["商品名: 鹿ソーセージ", "長さ: 15cm", "ケーシング: 羊腸24-26", "袋詰め: なし"],
+        notes: ["鹿肉: ジビエセンターから支給", "豚ひき肉: エーコープで仕入"]
+      },
+      zanzatei: {
+        name: "ざんざ亭",
+        description: "鹿ソーセージ",
+        suppliedDough: { productName: "鹿ソーセージ" },
+        specs: [
+          "生地支給: レシピなし",
+          "挽き目: 生地全量を6mmで挽く",
+          "ケーシング: 羊腸22-24（支給）",
+          "長さ: 13.5cm",
+          "規格袋: 15-25（支給）",
+          "袋詰め: 1袋5本詰め"
+        ]
+      },
+      touge: {
+        name: "峠の茶屋",
+        description: "あらびき・ハーブ",
+        recipes: [
+          { name: "あらびき", productName: "あらびき", baseRecipeName: "あらびき", kind: "touge", clientName: "峠の茶屋" },
+          { name: "ハーブ", productName: "ハーブ", baseRecipeName: "ハーブ", kind: "touge", clientName: "峠の茶屋" }
+        ],
+        specs: ["ケーシング: 羊腸22-24", "長さ: 10cm", "規格袋: 12-17", "袋詰め: あらびき、ハーブを1本ずつの計2本で袋詰め"]
+      }
+    };
 
-let lastCopyText = '';
+    const menuSections = [
+      {
+        title: "自社レシピ",
+        items: Object.entries(ownRecipes).map(([id, recipe]) => ({ label: recipe.name, description: recipe.description, type: "recipe", id }))
+      },
+      {
+        title: "委託製造",
+        items: Object.entries(outsourceClients).map(([id, client]) => ({ label: client.name, description: client.description, type: "client", id }))
+      },
+      {
+        title: "管理・計算",
+        items: [
+          { label: "ベーコン", description: "塩・三温糖・塩漬け予定", type: "curing", id: "bacon" },
+          { label: "生ハム", description: "塩・熟成完了予定", type: "curing", id: "prosciutto" },
+          { label: "乳化生地", description: "豚肉のみ / 豚肉＋豚脂", type: "emulsion", id: "emulsion" }
+        ]
+      }
+    ];
 
-function round1(n){ return Math.round((Number(n)||0) * 10) / 10; }
-function fmt(n){ return round1(n).toLocaleString('ja-JP', { maximumFractionDigits: 1 }); }
-function todayStr(){ return new Date().toISOString().slice(0,10); }
-function addDays(dateStr, days){ const d = new Date(dateStr); d.setDate(d.getDate()+days); return d.toISOString().slice(0,10); }
-function addMonths(dateStr, months){ const d = new Date(dateStr); d.setMonth(d.getMonth()+months); return d.toISOString().slice(0,10); }
-function tableHtml(title, rows){
-  return `<h3>${title}</h3><table><tbody>${rows.map(r=>`<tr><th>${r[0]}</th><td>${r[1]}</td></tr>`).join('')}</tbody></table>`;
-}
-function showSection(id){
-  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
-  window.scrollTo({top:0, behavior:'smooth'});
-}
+    const app = document.getElementById("app");
+    const topbar = document.getElementById("topbar");
+    const backButton = document.getElementById("backButton");
+    const screenTitle = document.getElementById("screenTitle");
+    const screenSubtitle = document.getElementById("screenSubtitle");
 
-function init(){
-  const sel = document.getElementById('productRecipe');
-  Object.entries(recipes).forEach(([key, r]) => {
-    const o = document.createElement('option'); o.value = key; o.textContent = r.name; sel.appendChild(o);
-  });
-  renderProductInputs(); renderEmulsionInputs(); renderAgingInputs();
-}
+    backButton.addEventListener("click", showHome);
 
-function renderProductInputs(){
-  const mode = document.getElementById('emulsionMode').value;
-  const wrap = document.getElementById('manualEmulsionWrap');
-  wrap.innerHTML = mode === 'manual'
-    ? `<label>乳化生地重量(g)</label><input id="manualEmulsion" type="number" inputmode="decimal" placeholder="例：800" oninput="calcProduct()" />`
-    : `<p class="note">乳化生地は（肉重量＋水）×0.2で自動計算します。</p>`;
-}
+    function setHeader(title, subtitle, canGoBack) {
+      screenTitle.textContent = title;
+      screenSubtitle.textContent = subtitle || "";
+      topbar.classList.toggle("has-back", Boolean(canGoBack));
+    }
 
-function calcProduct(){
-  const key = document.getElementById('productRecipe').value;
-  const recipe = recipes[key];
-  const meat = Number(document.getElementById('meatWeight').value) || 0;
-  const water = meat * recipe.waterRate;
-  const mode = document.getElementById('emulsionMode').value;
-  const emulsion = mode === 'manual' ? (Number(document.getElementById('manualEmulsion')?.value) || 0) : (meat + water) * recipe.emulsionAutoRate;
-  if(!meat){ document.getElementById('productResult').innerHTML = `<h3>計算結果</h3><p class="note" style="padding:12px;">肉重量を入力してください。</p>`; return; }
-  const ctx = { meat, water, emulsion };
-  const rows = recipe.items.map(item => [item.name, `${fmt(item.calc(ctx))} g`]);
-  const totalBase = meat + water + emulsion;
-  rows.push(['肉＋水＋乳化生地', `${fmt(totalBase)} g`]);
-  document.getElementById('productResult').innerHTML = tableHtml(`${recipe.name} 配合`, rows);
-  lastCopyText = `【製品レシピ計算】\nレシピ：${recipe.name}\n肉重量：${fmt(meat)}g\n乳化生地モード：${mode==='auto'?'自動計算':'手入力'}\n` + rows.map(r=>`${r[0]}：${r[1]}`).join('\n');
-}
+    function todayString() {
+      const date = new Date();
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    }
 
-function renderEmulsionInputs(){
-  const type = document.getElementById('emulsionType').value;
-  const html = type === 'porkOnly'
-    ? `<label>肉重量(g)</label><input id="emulsionWeight" type="number" inputmode="decimal" placeholder="例：3000" oninput="calcEmulsion()" /><p class="note">豚脂・氷は肉重量の3分の1で計算します。</p>`
-    : `<label>豚肉＋豚脂重量(g)</label><input id="emulsionWeight" type="number" inputmode="decimal" placeholder="例：4000" oninput="calcEmulsion()" /><p class="note">豚肉＋豚脂＋氷を100%とし、豚肉＋豚脂80%、氷20%で計算します。氷＝豚肉＋豚脂×0.25。</p>`;
-  document.getElementById('emulsionInputs').innerHTML = html;
-}
+    function addDays(dateString, days) {
+      const date = new Date(dateString + "T00:00:00");
+      date.setDate(date.getDate() + Number(days));
+      return date.toISOString().slice(0, 10);
+    }
 
-function calcEmulsion(){
-  const type = document.getElementById('emulsionType').value;
-  const w = Number(document.getElementById('emulsionWeight')?.value) || 0;
-  if(!w){ document.getElementById('emulsionResult').innerHTML = `<h3>計算結果</h3><p class="note" style="padding:12px;">重量を入力してください。</p>`; return; }
-  let rows = [];
-  let total = 0;
-  if(type === 'porkOnly'){
-    const pork = w;
-    const fat = pork / 3;
-    const ice = pork / 3;
-    total = pork + fat + ice;
-    rows = [['豚肉', `${fmt(pork)} g`], ['豚脂', `${fmt(fat)} g`], ['氷', `${fmt(ice)} g`]];
-  } else {
-    const porkFat = w;
-    const ice = porkFat * 0.25;
-    total = porkFat + ice;
-    rows = [['豚肉＋豚脂', `${fmt(porkFat)} g`], ['氷', `${fmt(ice)} g`]];
-  }
-  rows.push(['合計', `${fmt(total)} g`]);
-  rows.push(['塩', `${fmt(total * 0.016)} g`]);
-  rows.push(['ヘラビンE', `${fmt(total * 0.003)} g`]);
-  rows.push(['ペルビナールHH', `${fmt(total * 0.001)} g`]);
-  const title = type === 'porkOnly' ? '乳化生地：豚肉のみ' : '乳化生地：豚肉＋豚脂';
-  document.getElementById('emulsionResult').innerHTML = tableHtml(title, rows);
-  lastCopyText = `【乳化生地計算】\n${title}\n` + rows.map(r=>`${r[0]}：${r[1]}`).join('\n');
-}
+    function addMonths(dateString, months) {
+      const date = new Date(dateString + "T00:00:00");
+      date.setMonth(date.getMonth() + Number(months));
+      return date.toISOString().slice(0, 10);
+    }
 
-function renderAgingInputs(){
-  const type = document.getElementById('agingType').value;
-  const html = type === 'bacon'
-    ? `<label>豚バラ肉重量(g)</label><input id="agingWeight" type="number" inputmode="decimal" placeholder="例：5000" oninput="calcAging()" /><label>塩漬け開始日</label><input id="agingStart" type="date" value="${todayStr()}" onchange="calcAging()" />`
-    : `<label>骨付きもも肉重量(g)</label><input id="agingWeight" type="number" inputmode="decimal" placeholder="例：9000" oninput="calcAging()" /><label>仕込み日</label><input id="agingStart" type="date" value="${todayStr()}" onchange="calcAging()" /><label>熟成期間</label><select id="agingMonths" onchange="calcAging()"><option value="12">12か月</option><option value="18">18か月</option></select>`;
-  document.getElementById('agingInputs').innerHTML = html;
-}
+    function formatNumber(value, digits = 1) {
+      const numericValue = Number(value);
+      return numericValue.toLocaleString("ja-JP", {
+        minimumFractionDigits: digits,
+        maximumFractionDigits: digits
+      });
+    }
 
-function calcAging(){
-  const type = document.getElementById('agingType').value;
-  const w = Number(document.getElementById('agingWeight')?.value) || 0;
-  const start = document.getElementById('agingStart')?.value || todayStr();
-  if(!w){ document.getElementById('agingResult').innerHTML = `<h3>計算結果</h3><p class="note" style="padding:12px;">重量を入力してください。</p>`; return; }
-  let rows = [];
-  let title = '';
-  if(type === 'bacon'){
-    title = 'ベーコン管理';
-    const salt = w * 0.025;
-    const sugar = salt * 0.25;
-    rows = [['豚バラ肉重量', `${fmt(w)} g`], ['塩', `${fmt(salt)} g`], ['三温糖', `${fmt(sugar)} g`], ['塩漬け開始日', start], ['塩漬け終了予定', addDays(start, 7)]];
-  } else {
-    title = '生ハム管理';
-    const months = Number(document.getElementById('agingMonths')?.value) || 12;
-    rows = [['骨付きもも肉重量', `${fmt(w)} g`], ['塩', `${fmt(w * 0.10)} g`], ['仕込み日', start], ['熟成期間', `${months}か月`], ['熟成完了予定日', addMonths(start, months)]];
-  }
-  document.getElementById('agingResult').innerHTML = tableHtml(title, rows);
-  lastCopyText = `【熟成管理】\n${title}\n` + rows.map(r=>`${r[0]}：${r[1]}`).join('\n');
-}
+    function createButton(item) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "menu-button";
+      button.dataset.type = item.type;
+      button.dataset.id = item.id;
+      button.innerHTML = `<strong>${item.label}</strong><span>${item.description || ""}</span>`;
+      return button;
+    }
 
-async function copyCurrent(kind){
-  if(kind === 'product') calcProduct();
-  if(kind === 'emulsion') calcEmulsion();
-  if(kind === 'aging') calcAging();
-  if(!lastCopyText){ alert('先に重量を入力してください。'); return; }
-  try { await navigator.clipboard.writeText(lastCopyText); alert('コピーしました。GoodNotesやExcelへ貼り付けできます。'); }
-  catch(e){
-    const ta = document.createElement('textarea'); ta.className = 'copyBox'; ta.value = lastCopyText; document.querySelector('main').appendChild(ta); ta.select(); alert('自動コピーできない場合は、表示された文字を選択してコピーしてください。');
-  }
-}
+    app.addEventListener("click", (event) => {
+      const button = event.target.closest(".menu-button");
+      if (!button) return;
+      const { type, id } = button.dataset;
+      if (type === "category") showCategory(id);
+      if (type === "recipe") showRecipe(id);
+      if (type === "client") showClient(id);
+      if (type === "curing") showCuring(id);
+      if (type === "emulsion") showEmulsion();
+    });
 
-init();
-</script>
+    function showHome() {
+      setHeader("食肉加工 配合・製造管理", "単体HTML / iPad・iPhone・Windows共通", false);
+      const cards = [
+        { label: "自社レシピ", description: "あらびき・チーズ・ハーブ・チョリソー", type: "category", id: "own" },
+        { label: "委託製造", description: "山小屋・ジビエセンター", type: "category", id: "clients" },
+        { label: "乳化生地", description: "豚肉のみ / 豚肉＋豚脂", type: "emulsion", id: "emulsion" },
+        { label: "熟成管理", description: "ベーコン・生ハム", type: "category", id: "curing" },
+        { label: "製造記録", description: "準備中", type: "category", id: "records" },
+        { label: "履歴一覧", description: "準備中", type: "category", id: "history" }
+      ];
+      app.innerHTML = `
+        <section class="section">
+          <h2>メニュー</h2>
+          <div class="grid home-grid">
+            ${cards.map((item) => `
+              <button class="menu-button" type="button" data-type="${item.type}" data-id="${item.id}">
+                <strong>${item.label}</strong><span>${item.description}</span>
+              </button>
+            `).join("")}
+          </div>
+        </section>
+      `;
+    }
+
+    function showCategory(categoryId) {
+      if (categoryId === "own") {
+        showCardList("自社レシピ", "商品を選択してください", menuSections[0].items);
+        return;
+      }
+      if (categoryId === "clients") {
+        showCardList("委託製造", "委託先を選択してください", menuSections[1].items);
+        return;
+      }
+      if (categoryId === "curing") {
+        showCardList("熟成管理", "管理項目を選択してください", menuSections[2].items.filter((item) => item.type === "curing"));
+        return;
+      }
+      showComingSoon(categoryId === "records" ? "製造記録" : "履歴一覧");
+    }
+
+    function showCardList(title, subtitle, items) {
+      setHeader(title, subtitle, true);
+      app.innerHTML = `
+        <section class="section">
+          <h2>${title}</h2>
+          <div class="grid menu-grid">
+            ${items.map((item) => `
+              <button class="menu-button" type="button" data-type="${item.type}" data-id="${item.id}">
+                <strong>${item.label}</strong><span>${item.description || ""}</span>
+              </button>
+            `).join("")}
+          </div>
+        </section>
+      `;
+    }
+
+    function showComingSoon(title) {
+      setHeader(title, "準備中", true);
+      app.innerHTML = `<section class="section"><h2>${title}</h2><div class="empty">準備中です。</div></section>`;
+    }
+
+    function recipeOptions() {
+      const own = Object.entries(ownRecipes).map(([id, recipe]) => ({ id: `own:${id}`, label: `自社 / ${recipe.name}` }));
+      const outsourced = Object.entries(outsourceClients)
+        .filter(([, client]) => client.recipe)
+        .map(([id, client]) => ({ id: `client:${id}`, label: `委託 / ${client.name}` }));
+      return [...own, ...outsourced];
+    }
+
+    function getRecipeByOptionId(optionId) {
+      const [type, id] = optionId.split(":");
+      if (type === "own") return ownRecipes[id];
+      if (type === "client") return outsourceClients[id].recipe;
+      return ownRecipes.arabiki;
+    }
+
+    function bindHomeRecipeCalculator() {
+      const select = document.getElementById("homeRecipeSelect");
+      const body = document.getElementById("homeRecipeBody");
+      const render = () => {
+        const recipe = getRecipeByOptionId(select.value);
+        body.innerHTML = recipeCalculatorContentHtml(recipe, "home-recipe", true);
+        bindRecipeCalculator(recipe, "home-recipe");
+      };
+      select.addEventListener("change", render);
+      render();
+    }
+
+    function showRecipe(recipeId) {
+      const recipe = ownRecipes[recipeId];
+      setHeader(recipe.name, "自社レシピ 配合計算", true);
+      app.innerHTML = `<section class="section">${recipeCalculatorContentHtml(recipe, `recipe-${recipeId}`, true)}</section>`;
+      bindRecipeCalculator(recipe, `recipe-${recipeId}`);
+    }
+
+    function recipeCalculatorContentHtml(recipe, prefix, includeCopy) {
+      if (recipe.kind === "gibier") return gibierCalculatorContentHtml(recipe, prefix, includeCopy);
+      const isOwn = recipe.kind === "own" || recipe.kind === "touge";
+      const usesSplitMeatInput = isOwn || recipe.kind === "yamanoya";
+      return `
+        <div class="field-row">
+          <label>製造日
+            <input id="${prefix}-productionDate" type="date" value="${todayString()}">
+          </label>
+        </div>
+        <div class="product-name">${recipe.productName || recipe.name}</div>
+        <div class="field-row">
+          ${usesSplitMeatInput ? `
+            <label>6mm肉重量(g)
+              <input id="${prefix}-meat6mm" type="number" min="0" step="1" value="1000">
+            </label>
+            <label>3mm肉重量(g)
+              <input id="${prefix}-meat3mm" type="number" min="0" step="1" value="0">
+            </label>
+            <div class="product-name" id="${prefix}-meatTotalDisplay">肉重量合計(g): 1,000.0g</div>
+          ` : ""}
+          ${isOwn ? `
+            <label>計算結果の表示
+              <select id="${prefix}-split">
+                <option value="1">分割なし</option>
+                <option value="2">2等分</option>
+                <option value="3">3等分</option>
+                <option value="4">4等分</option>
+              </select>
+            </label>
+            <div class="radio-group" role="radiogroup" aria-label="乳化生地">
+              <label class="radio-option">
+                <input id="${prefix}-emulsionAuto" name="${prefix}-emulsionMode" type="radio" value="auto" checked>
+                乳化生地 自動計算
+              </label>
+              <label class="radio-option">
+                <input id="${prefix}-emulsionManual" name="${prefix}-emulsionMode" type="radio" value="manual">
+                乳化生地 手入力
+              </label>
+            </div>
+            <label id="${prefix}-manualEmulsionWrap" style="display:none">乳化生地重量(g)
+              <input id="${prefix}-emulsion" type="number" min="0" step="1" value="0">
+            </label>
+          ` : !usesSplitMeatInput ? `
+            <label>肉重量(g)
+              <input id="${prefix}-meat" type="number" min="0" step="1" value="1000">
+            </label>
+          ` : ""}
+          <button id="${prefix}-copy" class="primary" type="button">${includeCopy ? "GoodNotes用コピー" : "計算結果をコピー"}</button>
+        </div>
+        ${isOwn ? `<p class="note">自動計算: 乳化生地 =（肉重量＋水）×0.2 / 手入力: 入力値をそのまま使用</p>` : ""}
+        <div id="${prefix}-result"></div>
+        <div class="copy-area">
+          <textarea id="${prefix}-copyText" readonly></textarea>
+          <div id="${prefix}-status" class="status"></div>
+        </div>
+      `;
+    }
+
+    function bindRecipeCalculator(recipe, prefix) {
+      if (recipe.kind === "gibier") {
+        bindGibierCalculator(recipe, prefix);
+        return;
+      }
+      const productionDateInput = document.getElementById(`${prefix}-productionDate`);
+      const meatInput = document.getElementById(`${prefix}-meat`);
+      const meat6mmInput = document.getElementById(`${prefix}-meat6mm`);
+      const meat3mmInput = document.getElementById(`${prefix}-meat3mm`);
+      const meatTotalDisplay = document.getElementById(`${prefix}-meatTotalDisplay`);
+      const emulsionInput = document.getElementById(`${prefix}-emulsion`);
+      const emulsionAuto = document.getElementById(`${prefix}-emulsionAuto`);
+      const emulsionManual = document.getElementById(`${prefix}-emulsionManual`);
+      const manualEmulsionWrap = document.getElementById(`${prefix}-manualEmulsionWrap`);
+      const splitSelect = document.getElementById(`${prefix}-split`);
+      const result = document.getElementById(`${prefix}-result`);
+      const copyText = document.getElementById(`${prefix}-copyText`);
+      const copyButton = document.getElementById(`${prefix}-copy`);
+      const status = document.getElementById(`${prefix}-status`);
+
+      const render = () => {
+        const meat6mm = meat6mmInput ? Math.max(Number(meat6mmInput.value || 0), 0) : 0;
+        const meat3mm = meat3mmInput ? Math.max(Number(meat3mmInput.value || 0), 0) : 0;
+        const meat = meatInput ? Math.max(Number(meatInput.value || 0), 0) : meat6mm + meat3mm;
+        if (meatTotalDisplay) meatTotalDisplay.textContent = `肉重量合計(g): ${formatNumber(meat)}g`;
+        const water = meat * 0.2;
+        const useManualEmulsion = Boolean(emulsionManual && emulsionManual.checked);
+        const emulsion = emulsionInput && useManualEmulsion ? Math.max(Number(emulsionInput.value || 0), 0) : (meat + water) * 0.2;
+        if (manualEmulsionWrap) manualEmulsionWrap.style.display = useManualEmulsion ? "grid" : "none";
+        const emulsionMode = useManualEmulsion ? "手入力" : "自動計算";
+        const recipeNameForCalc = recipe.baseRecipeName || recipe.name;
+        const rows = recipe.kind === "yamanoya" ? calculateYamanoya(meat) : calculateOwnRecipe(recipeNameForCalc, meat, emulsion, emulsionMode);
+        const total = rows.reduce((sum, row) => sum + row.calculated, 0);
+        const splitCount = splitSelect ? Number(splitSelect.value || 1) : 1;
+        const splitLabel = splitLabelText(splitCount);
+        const displayRows = splitRows(rows, splitCount);
+        const displayTotal = total / splitCount;
+        const splitMeatInfo = meatTotalDisplay ? {
+          meat6mm: meat6mm / splitCount,
+          meat3mm: meat3mm / splitCount,
+          meatTotal: meat / splitCount
+        } : null;
+        result.innerHTML = `${splitCount > 1 ? `<p class="note">表示：${splitLabel}（1回分あたりの分量）</p>` : ""}${tableHtml(displayRows, displayTotal)}`;
+        if (recipe.kind === "touge") {
+          copyText.value = buildTougeCopyText(recipe, displayRows, displayTotal, productionDateInput.value, splitLabel, splitMeatInfo, emulsionMode);
+        } else {
+          copyText.value = buildCopyText(recipe.name, displayRows, displayTotal, "g", productionDateInput.value, splitSelect ? splitLabel : null, splitMeatInfo);
+        }
+      };
+
+      productionDateInput.addEventListener("input", render);
+      if (meatInput) meatInput.addEventListener("input", render);
+      if (meat6mmInput) meat6mmInput.addEventListener("input", render);
+      if (meat3mmInput) meat3mmInput.addEventListener("input", render);
+      if (emulsionInput) emulsionInput.addEventListener("input", render);
+      if (emulsionAuto) emulsionAuto.addEventListener("change", render);
+      if (emulsionManual) emulsionManual.addEventListener("change", render);
+      if (splitSelect) splitSelect.addEventListener("change", render);
+      copyButton.addEventListener("click", () => copyToClipboard(copyText.value, status));
+      render();
+    }
+
+    function gibierCalculatorContentHtml(recipe, prefix, includeCopy) {
+      return `
+        <div class="field-row">
+          <label>製造日
+            <input id="${prefix}-productionDate" type="date" value="${todayString()}">
+          </label>
+        </div>
+        <div class="product-name">${recipe.productName || recipe.name}</div>
+        <div class="field-row">
+          <label>鹿肉重量(g)
+            <input id="${prefix}-deer" type="number" min="0" step="1" value="7000">
+          </label>
+          <label>豚ひき肉重量(g)
+            <input id="${prefix}-pork" type="number" min="0" step="1" value="3000">
+          </label>
+          <button id="${prefix}-copy" class="primary" type="button">${includeCopy ? "GoodNotes用コピー" : "計算結果をコピー"}</button>
+        </div>
+        <ul class="spec-list">
+          <li>鹿肉: ジビエセンターから支給</li>
+          <li>豚ひき肉: エーコープで仕入</li>
+        </ul>
+        <div id="${prefix}-result"></div>
+        <div class="copy-area">
+          <textarea id="${prefix}-copyText" readonly></textarea>
+          <div id="${prefix}-status" class="status"></div>
+        </div>
+      `;
+    }
+
+    function bindGibierCalculator(recipe, prefix) {
+      const productionDateInput = document.getElementById(`${prefix}-productionDate`);
+      const deerInput = document.getElementById(`${prefix}-deer`);
+      const porkInput = document.getElementById(`${prefix}-pork`);
+      const result = document.getElementById(`${prefix}-result`);
+      const copyText = document.getElementById(`${prefix}-copyText`);
+      const copyButton = document.getElementById(`${prefix}-copy`);
+      const status = document.getElementById(`${prefix}-status`);
+
+      const render = () => {
+        const deer = Math.max(Number(deerInput.value || 0), 0);
+        const pork = Math.max(Number(porkInput.value || 0), 0);
+        const rows = calculateGibier(deer, pork);
+        const total = rows.reduce((sum, row) => sum + row.calculated, 0);
+        result.innerHTML = tableHtml(rows, total);
+        copyText.value = buildGibierCopyText(recipe, productionDateInput.value, rows, total);
+      };
+
+      productionDateInput.addEventListener("input", render);
+      deerInput.addEventListener("input", render);
+      porkInput.addEventListener("input", render);
+      copyButton.addEventListener("click", () => copyToClipboard(copyText.value, status));
+      render();
+    }
+
+    function calculateOwnRecipe(recipeName, meat, emulsion, emulsionMode = "自動計算") {
+      const water = meat * 0.2;
+      const meatWater = meat + water;
+      const meatWaterEmulsion = meat + water + emulsion;
+      const rows = [
+        { name: "肉重量", group: "入力", calculated: meat },
+        { name: "水", group: "肉重量×0.2", calculated: water },
+        { name: "乳化生地", group: emulsionMode === "手入力" ? "手入力値をそのまま使用" : "（肉重量＋水）×0.2", calculated: emulsion },
+        { name: "塩", group: "（肉重量＋水）×1.6%", calculated: meatWater * 0.016 }
+      ];
+
+      if (recipeName === "あらびき" || recipeName === "チーズ") {
+        rows.push({ name: "ウインナーヘラマント", group: "（肉重量＋水＋乳化生地）×0.5%", calculated: meatWaterEmulsion * 0.005 });
+      }
+
+      if (recipeName === "ハーブ") {
+        rows.push({ name: "ブラートブルストD", group: "（肉重量＋水＋乳化生地）×0.5%", calculated: meatWaterEmulsion * 0.005 });
+      }
+
+      rows.push(
+        { name: "ヘラビンE", group: "（肉重量＋水）×0.3%", calculated: meatWater * 0.003 },
+        { name: "ペルビナールHH", group: "（肉重量＋水）×0.1%", calculated: meatWater * 0.001 }
+      );
+
+      if (recipeName === "チーズ") {
+        rows.push({ name: "チーズ", group: "（肉重量＋水＋乳化生地）×10%", calculated: meatWaterEmulsion * 0.10 });
+      }
+
+      if (recipeName === "ハーブ") {
+        rows.push(
+          { name: "マジョラム", group: "（肉重量＋水＋乳化生地）×0.1%", calculated: meatWaterEmulsion * 0.001 },
+          { name: "バジル", group: "（肉重量＋水＋乳化生地）×0.05%", calculated: meatWaterEmulsion * 0.0005 },
+          { name: "オレガノ", group: "（肉重量＋水＋乳化生地）×0.05%", calculated: meatWaterEmulsion * 0.0005 }
+        );
+      }
+
+      if (recipeName === "チョリソー") {
+        rows.push(
+          { name: "チョリソースパイス", group: "（肉重量＋水＋乳化生地）×1.2%", calculated: meatWaterEmulsion * 0.012 },
+          { name: "唐辛子", group: "（肉重量＋水＋乳化生地）×0.2%", calculated: meatWaterEmulsion * 0.002 }
+        );
+      }
+
+      return rows;
+    }
+
+    function calculateYamanoya(meat) {
+      const backFat = meat * 0.16;
+      const water = (meat + backFat) * 0.2;
+      const base = meat + backFat + water;
+      return [
+        { name: "肉重量", group: "入力", calculated: meat },
+        { name: "背脂", group: "肉重量×16%", calculated: backFat },
+        { name: "水", group: "（肉重量＋背脂）×0.2", calculated: water },
+        { name: "塩", group: "（肉重量＋背脂＋水）×1.6%", calculated: base * 0.016 },
+        { name: "スパイス", group: "（肉重量＋背脂＋水）×1.6%", calculated: base * 0.016 },
+        { name: "ヘラビンE", group: "（肉重量＋背脂＋水）×0.3%", calculated: base * 0.003 },
+        { name: "ペルビナールHH", group: "（肉重量＋背脂＋水）×0.1%", calculated: base * 0.001 }
+      ];
+    }
+
+    function calculateGibier(deer, pork) {
+      const meatTotal = deer + pork;
+      const water = meatTotal * 0.2;
+      const base = meatTotal + water;
+      return [
+        { name: "鹿肉重量", group: "入力 / ジビエセンターから支給", calculated: deer },
+        { name: "豚ひき肉重量", group: "入力 / エーコープで仕入", calculated: pork },
+        { name: "水", group: "（鹿肉＋豚ひき肉）×0.2", calculated: water },
+        { name: "塩", group: "（鹿肉＋豚ひき肉＋水）×1.6%", calculated: base * 0.016 },
+        { name: "ウインナーヘラマント", group: "（鹿肉＋豚ひき肉＋水）×0.5%", calculated: base * 0.005 },
+        { name: "ヘラビンE", group: "（鹿肉＋豚ひき肉＋水）×0.3%", calculated: base * 0.003 },
+        { name: "ペルビナールHH", group: "（鹿肉＋豚ひき肉＋水）×0.1%", calculated: base * 0.001 }
+      ];
+    }
+
+    function tableHtml(rows, total, unit = "g") {
+      return `
+        <div class="result-box">
+          ${rows.map((row) => `
+            <div class="result-row">
+              <div class="result-name">${row.name}</div>
+              <div class="result-value">${formatNumber(row.calculated)}${unit}</div>
+              ${row.group ? `<div class="result-formula">${row.group}</div>` : ""}
+            </div>
+          `).join("")}
+          <div class="result-row">
+            <div class="result-name">合計</div>
+            <div class="result-value">${formatNumber(total)}${unit}</div>
+          </div>
+        </div>
+      `;
+    }
+
+    function splitLabelText(splitCount) {
+      if (splitCount === 2) return "2等分";
+      if (splitCount === 3) return "3等分";
+      if (splitCount === 4) return "4等分";
+      return "分割なし";
+    }
+
+    function splitRows(rows, splitCount) {
+      return rows.map((row) => ({
+        ...row,
+        calculated: row.calculated / splitCount
+      }));
+    }
+
+    function buildCopyText(title, rows, total, unit = "g", productionDate = todayString(), splitLabel = null, meatInfo = null) {
+      const lines = [title, `製造日：${productionDate}`];
+      if (splitLabel) {
+        lines.push(`表示：${splitLabel}`);
+        if (splitLabel !== "分割なし") lines.push("※以下は1回分あたりの分量");
+      }
+      lines.push("");
+      if (meatInfo) {
+        lines.push(`6mm肉重量：${formatNumber(meatInfo.meat6mm)}${unit}`);
+        lines.push(`3mm肉重量：${formatNumber(meatInfo.meat3mm)}${unit}`);
+        lines.push(`肉重量合計：${formatNumber(meatInfo.meatTotal)}${unit}`);
+        lines.push("");
+      }
+      rows.forEach((row) => lines.push(`${row.name}: ${formatNumber(row.calculated)}${unit}`));
+      lines.push("", `合計: ${formatNumber(total)}${unit}`);
+      return lines.join("\n");
+    }
+
+    function buildGibierCopyText(recipe, productionDate, rows, total) {
+      const lines = [
+        "委託製造: ジビエセンター",
+        `商品名: ${recipe.productName || "鹿ソーセージ"}`,
+        `製造日：${productionDate}`,
+        "",
+        "材料・計算結果"
+      ];
+      rows.forEach((row) => lines.push(`${row.name}: ${formatNumber(row.calculated)}g`));
+      lines.push(
+        "",
+        `合計: ${formatNumber(total)}g`,
+        "",
+        "製造仕様",
+        "長さ: 15cm",
+        "ケーシング: 羊腸24-26",
+        "袋詰め: なし"
+      );
+      return lines.join("\n");
+    }
+
+    function buildTougeCopyText(recipe, rows, total, productionDate, splitLabel, meatInfo, emulsionMode) {
+      const lines = [
+        "委託先：峠の茶屋",
+        `商品名：${recipe.productName || recipe.name}`,
+        `製造日：${productionDate}`,
+        `乳化生地設定：${emulsionMode}`,
+        `分割表示設定：${splitLabel || "分割なし"}`
+      ];
+      if (splitLabel && splitLabel !== "分割なし") lines.push("※以下は1回分あたりの分量");
+      lines.push("");
+      if (meatInfo) {
+        lines.push(`6mm肉重量：${formatNumber(meatInfo.meat6mm)}g`);
+        lines.push(`3mm肉重量：${formatNumber(meatInfo.meat3mm)}g`);
+        lines.push(`肉重量合計：${formatNumber(meatInfo.meatTotal)}g`);
+        lines.push("");
+      }
+      rows.forEach((row) => lines.push(`${row.name}: ${formatNumber(row.calculated)}g`));
+      lines.push(
+        "",
+        `合計: ${formatNumber(total)}g`,
+        "",
+        "製造仕様",
+        "ケーシング: 羊腸22-24",
+        "長さ: 10cm",
+        "規格袋: 12-17",
+        "袋詰め: あらびき、ハーブを1本ずつの計2本で袋詰め"
+      );
+      return lines.join("\n");
+    }
+
+    function showClient(clientId) {
+      const client = outsourceClients[clientId];
+      setHeader(client.name, "委託先 専用ページ", true);
+      if (client.planned) {
+        app.innerHTML = `<section class="section"><h2>${client.name}</h2><div class="empty">追加予定です。配合仕様は要確認です。</div></section>`;
+        return;
+      }
+      if (appState.activeClientTab === "spice" && !client.spiceMix) appState.activeClientTab = "calc";
+
+      app.innerHTML = `
+        <div class="tabbar">
+          <button class="tab ${appState.activeClientTab === "calc" ? "active" : ""}" data-tab="calc" type="button">${client.suppliedDough ? "作業メモ" : "配合計算"}</button>
+          <button class="tab ${appState.activeClientTab === "spec" ? "active" : ""}" data-tab="spec" type="button">製造仕様</button>
+          ${client.spiceMix ? `<button class="tab ${appState.activeClientTab === "spice" ? "active" : ""}" data-tab="spice" type="button">スパイス</button>` : ""}
+        </div>
+        <div id="clientBody"></div>
+      `;
+
+      document.querySelectorAll(".tab").forEach((button) => {
+        button.addEventListener("click", () => {
+          appState.activeClientTab = button.dataset.tab;
+          showClient(clientId);
+        });
+      });
+      renderClientTab(client);
+    }
+
+    function renderClientTab(client) {
+      const body = document.getElementById("clientBody");
+      if (appState.activeClientTab === "calc") {
+        if (client.suppliedDough) {
+          body.innerHTML = suppliedDoughContentHtml(client, "supplied-dough");
+          bindSuppliedDough(client, "supplied-dough");
+          return;
+        }
+        if (client.recipes) {
+          body.innerHTML = `
+            <section class="section">
+              <h2>商品選択</h2>
+              <div class="field-row">
+                <label>商品
+                  <select id="clientRecipeSelect">
+                    ${client.recipes.map((recipe, index) => `<option value="${index}">${recipe.productName || recipe.name}</option>`).join("")}
+                  </select>
+                </label>
+              </div>
+              <div id="selectedClientRecipe"></div>
+            </section>
+            <section class="section">
+              <h2>製造仕様</h2>
+              <ul class="spec-list">${client.specs.map((spec) => `<li>${spec}</li>`).join("")}</ul>
+            </section>
+          `;
+          const select = document.getElementById("clientRecipeSelect");
+          const selectedBody = document.getElementById("selectedClientRecipe");
+          const renderSelected = () => {
+            const recipe = client.recipes[Number(select.value || 0)];
+            selectedBody.innerHTML = recipeCalculatorContentHtml(recipe, "client-recipe", true);
+            bindRecipeCalculator(recipe, "client-recipe");
+          };
+          select.addEventListener("change", renderSelected);
+          renderSelected();
+          return;
+        }
+        body.innerHTML = `
+          <section class="section">${recipeCalculatorContentHtml(client.recipe, "client-recipe", true)}</section>
+          <h2>製造仕様</h2>
+          <ul class="spec-list">${client.specs.map((spec) => `<li>${spec}</li>`).join("")}</ul>
+        `;
+        bindRecipeCalculator(client.recipe, "client-recipe");
+        return;
+      }
+
+      if (appState.activeClientTab === "spec") {
+        body.innerHTML = `<section class="section"><h2>製造仕様</h2><ul class="spec-list">${client.specs.map((spec) => `<li>${spec}</li>`).join("")}</ul></section>`;
+        return;
+      }
+
+      body.innerHTML = `
+        <section class="section">
+          <h2>山小屋 スパイス配合表</h2>
+          <div class="field-row">
+            <label>回数
+              <select id="spiceRuns">
+                <option value="1">1回分</option>
+                <option value="2">2回分</option>
+                <option value="3">3回分</option>
+                <option value="4">4回分</option>
+                <option value="custom">任意回数</option>
+              </select>
+            </label>
+            <label>任意回数
+              <input id="customSpiceRuns" type="number" min="1" step="1" value="1">
+            </label>
+            <button id="spiceCopy" class="primary" type="button">スパイス表をコピー</button>
+          </div>
+          <details>
+            <summary>配合表を表示</summary>
+            <div class="details-body" id="spiceResult"></div>
+          </details>
+          <div class="copy-area">
+            <textarea id="spiceCopyText" readonly></textarea>
+            <div id="spiceStatus" class="status"></div>
+          </div>
+        </section>
+      `;
+      bindSpiceCalculator(client);
+    }
+
+    function suppliedDoughContentHtml(client, prefix) {
+      return `
+        <section class="section">
+          <div class="field-row">
+            <label>製造日
+              <input id="${prefix}-productionDate" type="date" value="${todayString()}">
+            </label>
+          </div>
+          <div class="product-name">${client.suppliedDough.productName}</div>
+          <div class="field-row">
+            <label>生地重量(g)
+              <input id="${prefix}-weight" type="number" min="0" step="1" value="0">
+            </label>
+            <button id="${prefix}-copy" class="primary" type="button">GoodNotes用コピー</button>
+          </div>
+          <section class="section">
+            <h2>製造仕様</h2>
+            <ul class="spec-list">${client.specs.map((spec) => `<li>${spec}</li>`).join("")}</ul>
+          </section>
+          <div class="copy-area">
+            <textarea id="${prefix}-copyText" readonly></textarea>
+            <div id="${prefix}-status" class="status"></div>
+          </div>
+        </section>
+      `;
+    }
+
+    function bindSuppliedDough(client, prefix) {
+      const productionDate = document.getElementById(`${prefix}-productionDate`);
+      const weight = document.getElementById(`${prefix}-weight`);
+      const copyText = document.getElementById(`${prefix}-copyText`);
+      const copyButton = document.getElementById(`${prefix}-copy`);
+      const status = document.getElementById(`${prefix}-status`);
+
+      const render = () => {
+        copyText.value = buildSuppliedDoughCopyText(client, productionDate.value, Number(weight.value || 0));
+      };
+
+      productionDate.addEventListener("input", render);
+      weight.addEventListener("input", render);
+      copyButton.addEventListener("click", () => copyToClipboard(copyText.value, status));
+      render();
+    }
+
+    function buildSuppliedDoughCopyText(client, productionDate, doughWeight) {
+      return [
+        `委託先：${client.name}`,
+        `商品名：${client.suppliedDough.productName}`,
+        `製造日：${productionDate}`,
+        `生地重量：${formatNumber(doughWeight)}g`,
+        "",
+        "製造仕様",
+        "生地支給: レシピなし",
+        "挽き目: 生地全量を6mmで挽く",
+        "ケーシング: 羊腸22-24（支給）",
+        "長さ: 13.5cm",
+        "規格袋: 15-25（支給）",
+        "袋詰め: 1袋5本詰め"
+      ].join("\n");
+    }
+
+    function bindSpiceCalculator(client) {
+      const runsSelect = document.getElementById("spiceRuns");
+      const customRuns = document.getElementById("customSpiceRuns");
+      const result = document.getElementById("spiceResult");
+      const copyText = document.getElementById("spiceCopyText");
+      const copyButton = document.getElementById("spiceCopy");
+      const status = document.getElementById("spiceStatus");
+
+      const render = () => {
+        const runs = runsSelect.value === "custom" ? Math.max(Number(customRuns.value || 1), 1) : Number(runsSelect.value);
+        customRuns.disabled = runsSelect.value !== "custom";
+        const rows = client.spiceMix.map((item) => ({ name: item.name, group: `${formatNumber(item.amount)}g × ${runs}回`, calculated: item.amount * runs }));
+        const total = rows.reduce((sum, row) => sum + row.calculated, 0);
+        result.innerHTML = tableHtml(rows, total);
+        copyText.value = buildCopyText(`${client.name} スパイス配合表 ${runs}回分`, rows, total);
+      };
+
+      runsSelect.addEventListener("change", render);
+      customRuns.addEventListener("input", render);
+      copyButton.addEventListener("click", () => copyToClipboard(copyText.value, status));
+      render();
+    }
+
+    function showCuring(type) {
+      if (type === "bacon") showBacon();
+      if (type === "prosciutto") showProsciutto();
+    }
+
+    function showBacon() {
+      setHeader("ベーコン", "塩・三温糖・塩漬け予定", true);
+      app.innerHTML = `
+        <section class="section">
+          <div class="field-row">
+            <label>製造日
+              <input id="baconProductionDate" type="date" value="${todayString()}">
+            </label>
+          </div>
+          <div class="product-name">ベーコン</div>
+          <div class="field-row">
+            <label>豚バラ肉重量(g)
+              <input id="baconWeight" type="number" min="0" step="1" value="1000">
+            </label>
+            <label>塩漬け開始日
+              <input id="baconStart" type="date" value="${todayString()}">
+            </label>
+            <button id="baconCopy" class="primary" type="button">GoodNotes用コピー</button>
+          </div>
+          <div id="baconResult"></div>
+          <div class="copy-area">
+            <textarea id="baconText" readonly></textarea>
+            <div id="baconStatus" class="status"></div>
+          </div>
+        </section>
+      `;
+      const productionDate = document.getElementById("baconProductionDate");
+      const weight = document.getElementById("baconWeight");
+      const start = document.getElementById("baconStart");
+      const result = document.getElementById("baconResult");
+      const text = document.getElementById("baconText");
+      const status = document.getElementById("baconStatus");
+      const render = () => {
+        const pork = Math.max(Number(weight.value || 0), 0);
+        const rows = [
+          { name: "豚バラ肉重量", group: "入力", calculated: pork },
+          { name: "塩", group: "豚バラ肉重量×2.5%", calculated: pork * 0.025 },
+          { name: "三温糖", group: "塩×25%", calculated: pork * 0.025 * 0.25 }
+        ];
+        const endDate = addDays(start.value, 7);
+        result.innerHTML = tableHtml(rows, rows.reduce((sum, row) => sum + row.calculated, 0));
+        text.value = `${buildCopyText("ベーコン", rows, rows.reduce((sum, row) => sum + row.calculated, 0), "g", productionDate.value)}\n塩漬け開始日: ${start.value}\n塩漬け終了予定: ${endDate}`;
+      };
+      productionDate.addEventListener("input", render);
+      weight.addEventListener("input", render);
+      start.addEventListener("input", render);
+      document.getElementById("baconCopy").addEventListener("click", () => copyToClipboard(text.value, status));
+      render();
+    }
+
+    function showProsciutto() {
+      setHeader("生ハム", "塩・熟成完了予定", true);
+      app.innerHTML = `
+        <section class="section">
+          <div class="field-row">
+            <label>製造日
+              <input id="prosciuttoProductionDate" type="date" value="${todayString()}">
+            </label>
+          </div>
+          <div class="product-name">生ハム</div>
+          <div class="field-row">
+            <label>骨付きもも肉重量(g)
+              <input id="prosciuttoWeight" type="number" min="0" step="1" value="1000">
+            </label>
+            <label>仕込み日
+              <input id="prosciuttoStart" type="date" value="${todayString()}">
+            </label>
+            <label>熟成期間
+              <select id="prosciuttoMonths">
+                <option value="12">12か月</option>
+                <option value="18">18か月</option>
+              </select>
+            </label>
+            <button id="prosciuttoCopy" class="primary" type="button">GoodNotes用コピー</button>
+          </div>
+          <div id="prosciuttoResult"></div>
+          <div class="copy-area">
+            <textarea id="prosciuttoText" readonly></textarea>
+            <div id="prosciuttoStatus" class="status"></div>
+          </div>
+        </section>
+      `;
+      const productionDate = document.getElementById("prosciuttoProductionDate");
+      const weight = document.getElementById("prosciuttoWeight");
+      const start = document.getElementById("prosciuttoStart");
+      const months = document.getElementById("prosciuttoMonths");
+      const result = document.getElementById("prosciuttoResult");
+      const text = document.getElementById("prosciuttoText");
+      const status = document.getElementById("prosciuttoStatus");
+      const render = () => {
+        const pork = Math.max(Number(weight.value || 0), 0);
+        const rows = [
+          { name: "骨付きもも肉重量", group: "入力", calculated: pork },
+          { name: "塩", group: "骨付きもも肉重量×10%", calculated: pork * 0.10 }
+        ];
+        const endDate = addMonths(start.value, months.value);
+        result.innerHTML = tableHtml(rows, rows.reduce((sum, row) => sum + row.calculated, 0));
+        text.value = `${buildCopyText("生ハム", rows, rows.reduce((sum, row) => sum + row.calculated, 0), "g", productionDate.value)}\n仕込み日: ${start.value}\n熟成期間: ${months.value}か月\n熟成完了予定日: ${endDate}`;
+      };
+      productionDate.addEventListener("input", render);
+      weight.addEventListener("input", render);
+      start.addEventListener("input", render);
+      months.addEventListener("change", render);
+      document.getElementById("prosciuttoCopy").addEventListener("click", () => copyToClipboard(text.value, status));
+      render();
+    }
+
+    function showEmulsion() {
+      setHeader("乳化生地", "豚肉のみ / 豚肉＋豚脂", true);
+      app.innerHTML = `
+        <section class="section">
+          <div class="field-row">
+            <label>製造日
+              <input id="emulsionProductionDate" type="date" value="${todayString()}">
+            </label>
+          </div>
+          <div class="product-name">乳化生地</div>
+          <div class="field-row">
+            <label>方式
+              <select id="emulsionMode">
+                <option value="porkOnly">豚肉のみ</option>
+                <option value="porkFat">豚肉＋豚脂</option>
+              </select>
+            </label>
+            <label id="emulsionWeightLabel">肉重量(g)
+              <input id="emulsionWeight" type="number" min="0" step="1" value="1000">
+            </label>
+            <button id="emulsionCopy" class="primary" type="button">計算結果をコピー</button>
+          </div>
+          <div id="emulsionResult"></div>
+          <div class="copy-area">
+            <textarea id="emulsionText" readonly></textarea>
+            <div id="emulsionStatus" class="status"></div>
+          </div>
+        </section>
+      `;
+      const productionDate = document.getElementById("emulsionProductionDate");
+      const mode = document.getElementById("emulsionMode");
+      const weight = document.getElementById("emulsionWeight");
+      const label = document.getElementById("emulsionWeightLabel");
+      const result = document.getElementById("emulsionResult");
+      const text = document.getElementById("emulsionText");
+      const status = document.getElementById("emulsionStatus");
+      const render = () => {
+        const inputWeight = Math.max(Number(weight.value || 0), 0);
+        label.childNodes[0].nodeValue = mode.value === "porkOnly" ? "肉重量(g)\n" : "豚肉＋豚脂重量(g)\n";
+        const rows = mode.value === "porkOnly" ? calculateEmulsionPorkOnly(inputWeight) : calculateEmulsionPorkFat(inputWeight);
+        const total = rows.reduce((sum, row) => sum + row.calculated, 0);
+        result.innerHTML = tableHtml(rows, total);
+        text.value = buildCopyText(`乳化生地 ${mode.value === "porkOnly" ? "豚肉のみ" : "豚肉＋豚脂"}`, rows, total, "g", productionDate.value);
+      };
+      productionDate.addEventListener("input", render);
+      mode.addEventListener("change", render);
+      weight.addEventListener("input", render);
+      document.getElementById("emulsionCopy").addEventListener("click", () => copyToClipboard(text.value, status));
+      render();
+    }
+
+    function calculateEmulsionPorkOnly(meat) {
+      const porkFat = meat / 3;
+      const ice = meat / 3;
+      const base = meat + porkFat + ice;
+      return [
+        { name: "肉重量", group: "入力", calculated: meat },
+        { name: "豚脂", group: "肉重量÷3", calculated: porkFat },
+        { name: "氷", group: "肉重量÷3", calculated: ice },
+        { name: "塩", group: "（肉重量＋豚脂＋氷）×1.6%", calculated: base * 0.016 },
+        { name: "ヘラビンE", group: "（肉重量＋豚脂＋氷）×0.3%", calculated: base * 0.003 },
+        { name: "ペルビナールHH", group: "（肉重量＋豚脂＋氷）×0.1%", calculated: base * 0.001 }
+      ];
+    }
+
+    function calculateEmulsionPorkFat(weight) {
+      const ice = weight * 0.25;
+      const base = weight + ice;
+      return [
+        { name: "豚肉＋豚脂重量", group: "入力 / 完成比率80%", calculated: weight },
+        { name: "氷", group: "（豚肉＋豚脂）×0.25 / 完成比率20%", calculated: ice },
+        { name: "塩", group: "（豚肉＋豚脂＋氷）×1.6%", calculated: base * 0.016 },
+        { name: "ヘラビンE", group: "（豚肉＋豚脂＋氷）×0.3%", calculated: base * 0.003 },
+        { name: "ペルビナールHH", group: "（豚肉＋豚脂＋氷）×0.1%", calculated: base * 0.001 }
+      ];
+    }
+
+    async function copyToClipboard(text, statusElement) {
+      try {
+        await navigator.clipboard.writeText(text);
+        statusElement.textContent = "コピーしました";
+      } catch (error) {
+        statusElement.textContent = "コピーできない場合は、下の文字を選択してコピーしてください";
+      }
+    }
+
+    showHome();
+  </script>
 </body>
 </html>
