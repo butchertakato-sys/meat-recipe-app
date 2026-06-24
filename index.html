@@ -465,7 +465,8 @@
       activeClientTab: "calc"
     };
     const MANUFACTURING_RECORDS_KEY = "meatRecipeApp.manufacturingRecords.v1";
-    const MANUFACTURING_RECORD_CSV_HEADERS = ["仕込み日", "製造日", "製造区分", "レシピ名", "ロット番号", "担当者", "6mm肉重量", "3mm肉重量", "肉重量合計", "乳化生地重量", "成形本数", "加熱後本数", "包装数", "余り本数", "ロス本数", "完成重量", "ロス重量", "歩留まり率", "メモ"];
+    const SAVED_RECIPE_CALCULATIONS_KEY = "meatRecipeApp.savedRecipeCalculations.v1";
+    const MANUFACTURING_RECORD_CSV_HEADERS = ["仕込み日", "製造日", "製造区分", "レシピ名", "ロット番号", "6mm肉重量", "3mm肉重量", "肉重量合計", "乳化生地重量", "包装数", "ロス本数", "1パック重量", "1パック本数", "完成重量", "歩留まり率", "メモ"];
 
     const ownRecipes = {
       arabiki: { name: "あらびき", description: "自社レシピ", kind: "own" },
@@ -717,10 +718,7 @@
               <select id="recordRecipe"></select>
             </label>
             <label>製造ロット番号
-              <input id="recordLot" type="text" autocomplete="off">
-            </label>
-            <label>担当者
-              <input id="recordStaff" type="text" autocomplete="off">
+              <input id="recordLot" type="text" readonly>
             </label>
             <label>メモ
               <textarea id="recordMemo"></textarea>
@@ -729,56 +727,21 @@
         </section>
         <section class="section">
           <h2>レシピ由来の情報</h2>
-          <div class="field-row">
-            <label>6mm肉重量(g)
-              <input id="recordMeat6mm" type="number" inputmode="decimal" min="0" step="0.1" value="1000">
-            </label>
-            <label>3mm肉重量(g)
-              <input id="recordMeat3mm" type="number" inputmode="decimal" min="0" step="0.1" value="0">
-            </label>
-            <div class="product-name" id="recordMeatTotalDisplay">肉重量合計(g): 1,000.0g</div>
-            <div id="recordEmulsionControls">
-              <div class="radio-group" role="radiogroup" aria-label="乳化生地">
-                <label class="radio-option">
-                  <input id="recordEmulsionAuto" name="recordEmulsionMode" type="radio" value="auto" checked>
-                  乳化生地 自動計算
-                </label>
-                <label class="radio-option">
-                  <input id="recordEmulsionManual" name="recordEmulsionMode" type="radio" value="manual">
-                  乳化生地 手入力
-                </label>
-              </div>
-              <label id="recordManualEmulsionWrap" style="display:none">乳化生地重量(g)
-                <input id="recordEmulsionWeight" type="number" inputmode="decimal" min="0" step="0.1" value="0">
-              </label>
-            </div>
-          </div>
+          <div id="recordSavedCalcStatus" class="empty"></div>
           <div id="recordRecipeResult"></div>
         </section>
         <section class="section">
           <h2>製造数記録</h2>
           <div class="field-row">
-            <label>成形本数
-              <input id="recordMoldedCount" type="number" inputmode="numeric" min="0" step="1" value="0">
-            </label>
-            <label>加熱後本数
-              <input id="recordHeatedCount" type="number" inputmode="numeric" min="0" step="1" value="0">
-            </label>
             <label>包装数
               <input id="recordPackageCount" type="number" inputmode="numeric" min="0" step="1" value="0">
-            </label>
-            <label>余り本数
-              <input id="recordLeftoverCount" type="number" inputmode="numeric" min="0" step="1" value="0">
             </label>
             <label>ロス本数
               <input id="recordLossCount" type="number" inputmode="numeric" min="0" step="1" value="0">
             </label>
-            <label>完成重量(g)
-              <input id="recordFinishedWeight" type="number" inputmode="decimal" min="0" step="0.1" value="0">
-            </label>
-            <label>ロス重量(g)
-              <input id="recordLossWeight" type="number" inputmode="decimal" min="0" step="0.1" value="0">
-            </label>
+            <div class="product-name" id="recordPackWeightDisplay">1パック重量: 未設定</div>
+            <div class="product-name" id="recordPackCountDisplay">1パック本数: 未設定</div>
+            <div class="product-name" id="recordFinishedWeightDisplay">完成重量: 1パック重量未設定</div>
             <div class="product-name" id="recordYieldDisplay">歩留まり率: 0.0%</div>
             <button id="recordGoodNotes" class="secondary" type="button">GoodNotes転記</button>
             <button id="recordSave" class="primary" type="button">保存</button>
@@ -796,7 +759,7 @@
       const own = Object.entries(ownRecipes).map(([id, recipe]) => ({
         id: `own:${id}`,
         category: "自社レシピ",
-        label: recipe.name,
+        label: recordRecipeDisplayName(recipe),
         recipe
       }));
       const clientOptions = [];
@@ -804,15 +767,22 @@
       clientOptions.push({
         id: "client:yamanoya",
         category: "委託製造",
-        label: `${yamanoya.name} / ${yamanoya.recipe.productName || yamanoya.recipe.name}`,
+        label: recordRecipeDisplayName(yamanoya.recipe),
         recipe: yamanoya.recipe
+      });
+      const gibier = outsourceClients.gibier;
+      clientOptions.push({
+        id: "client:gibier",
+        category: "委託製造",
+        label: recordRecipeDisplayName(gibier.recipe),
+        recipe: gibier.recipe
       });
       const touge = outsourceClients.touge;
       touge.recipes.forEach((recipe, index) => {
         clientOptions.push({
           id: `client:touge:${index}`,
           category: "委託製造",
-          label: `${touge.name} / ${recipe.productName || recipe.name}`,
+          label: recordRecipeDisplayName(recipe),
           recipe
         });
       });
@@ -823,20 +793,71 @@
       return recordRecipeOptions(category).find((option) => option.id === optionId) || recordRecipeOptions(category)[0];
     }
 
+    function recordRecipeDisplayName(recipe) {
+      if (recipe.kind === "yamanoya") return "山小屋 / スパイスソーセージ";
+      if (recipe.kind === "gibier") return "ジビエセンター / 鹿ソーセージ";
+      if (recipe.kind === "touge") return `峠の茶屋 / ${recipe.productName || recipe.name}`;
+      return recipe.productName || recipe.name;
+    }
+
+    function recipeCodeForRecipe(recipe) {
+      if (recipe.kind === "yamanoya") return "YAMAGOYA";
+      if (recipe.kind === "gibier") return "GIBIER";
+      if (recipe.kind === "touge") return "TOUGE";
+      if (recipe.name === ownRecipes.arabiki.name || recipe.baseRecipeName === ownRecipes.arabiki.name) return "ARABIKI";
+      if (recipe.name === ownRecipes.cheese.name || recipe.baseRecipeName === ownRecipes.cheese.name) return "CHEESE";
+      if (recipe.name === ownRecipes.herb.name || recipe.baseRecipeName === ownRecipes.herb.name) return "HERB";
+      if (recipe.name === ownRecipes.chorizo.name || recipe.baseRecipeName === ownRecipes.chorizo.name) return "CHORIZO";
+      return "RECIPE";
+    }
+
+    function recipeRecordCategory(recipe) {
+      return recipe.kind === "own" ? "自社レシピ" : "委託製造";
+    }
+
+    function loadSavedRecipeCalculations() {
+      try {
+        const parsed = JSON.parse(localStorage.getItem(SAVED_RECIPE_CALCULATIONS_KEY) || "[]");
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (error) {
+        return [];
+      }
+    }
+
+    function saveRecipeCalculation(calculation) {
+      if (!calculation) return;
+      const records = loadSavedRecipeCalculations();
+      records.unshift({ ...calculation, id: `${Date.now()}` });
+      localStorage.setItem(SAVED_RECIPE_CALCULATIONS_KEY, JSON.stringify(records));
+    }
+
+    function findSavedRecipeCalculation(prepDate, category, recipeName) {
+      return loadSavedRecipeCalculations().find((item) => (
+        item.prepDate === prepDate &&
+        item.category === category &&
+        item.recipeName === recipeName
+      ));
+    }
+
+    function generateManufacturingLot(dateString, category, recipe) {
+      const datePart = (dateString || todayString()).replace(/-/g, "");
+      const categoryCode = category === "自社レシピ" ? "JI" : "IT";
+      const base = `${datePart}-${categoryCode}-${recipeCodeForRecipe(recipe)}`;
+      const count = loadManufacturingRecords().filter((record) => String(record.lot || "").startsWith(base)).length;
+      return count === 0 ? base : `${base}-${String(count).padStart(2, "0")}`;
+    }
+
     function bindManufacturingRecordForm() {
       const ids = [
-        "recordPrepDate", "recordDate", "recordCategory", "recordRecipe", "recordLot", "recordStaff", "recordMemo",
-        "recordMeat6mm", "recordMeat3mm", "recordEmulsionWeight",
-        "recordMoldedCount", "recordHeatedCount", "recordPackageCount", "recordLeftoverCount", "recordLossCount",
-        "recordFinishedWeight", "recordLossWeight"
+        "recordPrepDate", "recordDate", "recordCategory", "recordRecipe", "recordLot", "recordMemo",
+        "recordPackageCount", "recordLossCount"
       ];
       const elements = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
-      const emulsionAuto = document.getElementById("recordEmulsionAuto");
-      const emulsionManual = document.getElementById("recordEmulsionManual");
-      const emulsionControls = document.getElementById("recordEmulsionControls");
-      const manualEmulsionWrap = document.getElementById("recordManualEmulsionWrap");
-      const meatTotalDisplay = document.getElementById("recordMeatTotalDisplay");
+      const savedCalcStatus = document.getElementById("recordSavedCalcStatus");
       const recipeResult = document.getElementById("recordRecipeResult");
+      const packWeightDisplay = document.getElementById("recordPackWeightDisplay");
+      const packCountDisplay = document.getElementById("recordPackCountDisplay");
+      const finishedWeightDisplay = document.getElementById("recordFinishedWeightDisplay");
       const yieldDisplay = document.getElementById("recordYieldDisplay");
       const goodNotesText = document.getElementById("recordGoodNotesText");
       const status = document.getElementById("recordStatus");
@@ -847,13 +868,19 @@
       };
 
       const render = () => {
-        const record = collectManufacturingRecord(elements, emulsionAuto, emulsionManual);
-        const showEmulsion = record.recipeKind === "own" || record.recipeKind === "touge";
-        emulsionControls.style.display = showEmulsion ? "grid" : "none";
-        manualEmulsionWrap.style.display = showEmulsion && record.emulsionMode === "手入力" ? "grid" : "none";
-        meatTotalDisplay.textContent = `肉重量合計(g): ${formatNumber(record.meatTotal)}g`;
-        yieldDisplay.textContent = `歩留まり率: ${formatNumber(record.yieldRate)}%`;
-        recipeResult.innerHTML = `${meatInfoHtml({ meat6mm: record.meat6mm, meat3mm: record.meat3mm, meatTotal: record.meatTotal })}${tableHtml(record.recipeRows, record.recipeTotal)}`;
+        const record = collectManufacturingRecord(elements);
+        elements.recordLot.value = record.lot;
+        if (record.savedCalculation) {
+          savedCalcStatus.textContent = "保存済みレシピ計算データを反映しました";
+          recipeResult.innerHTML = `${meatInfoHtml({ meat6mm: record.meat6mm, meat3mm: record.meat3mm, meatTotal: record.meatTotal })}${tableHtml(record.recipeRows, record.recipeTotal)}`;
+        } else {
+          savedCalcStatus.textContent = "保存済みのレシピ計算データが見つかりません。先にレシピページで計算結果を保存してください。";
+          recipeResult.innerHTML = "";
+        }
+        packWeightDisplay.textContent = `1パック重量: ${record.packWeight == null ? "未設定" : `${formatRecordNumber(record.packWeight)}g`}`;
+        packCountDisplay.textContent = `1パック本数: ${record.packPieces == null ? "未設定" : `${record.packPieces}本`}`;
+        finishedWeightDisplay.textContent = `完成重量: ${record.finishedWeight == null ? "1パック重量未設定" : `${formatRecordNumber(record.finishedWeight)}g`}`;
+        yieldDisplay.textContent = `歩留まり率: ${record.yieldRate == null ? "1パック重量未設定" : `${formatRecordNumber(record.yieldRate)}%`}`;
         goodNotesText.value = buildManufacturingRecordText(record);
       };
 
@@ -866,11 +893,9 @@
         if (id !== "recordCategory") elements[id].addEventListener("input", render);
         if (id === "recordRecipe") elements[id].addEventListener("change", render);
       });
-      emulsionAuto.addEventListener("change", render);
-      emulsionManual.addEventListener("change", render);
       document.getElementById("recordGoodNotes").addEventListener("click", render);
       document.getElementById("recordSave").addEventListener("click", () => {
-        const record = collectManufacturingRecord(elements, emulsionAuto, emulsionManual);
+        const record = collectManufacturingRecord(elements);
         record.id = `${Date.now()}`;
         record.savedAt = new Date().toISOString();
         const records = loadManufacturingRecords();
@@ -882,24 +907,15 @@
       render();
     }
 
-    function collectManufacturingRecord(elements, emulsionAuto, emulsionManual) {
+    function collectManufacturingRecord(elements) {
       const option = getRecordRecipeOption(elements.recordRecipe.value, elements.recordCategory.value);
-      const meat6mm = Math.max(Number(elements.recordMeat6mm.value || 0), 0);
-      const meat3mm = Math.max(Number(elements.recordMeat3mm.value || 0), 0);
-      const meatTotal = meat6mm + meat3mm;
-      const water = meatTotal * 0.2;
-      const useManualEmulsion = Boolean(emulsionManual && emulsionManual.checked);
-      const emulsionMode = useManualEmulsion ? "手入力" : "自動計算";
-      const needsEmulsion = option.recipe.kind === "own" || option.recipe.kind === "touge";
-      const emulsionWeight = needsEmulsion
-        ? (useManualEmulsion ? Math.max(Number(elements.recordEmulsionWeight.value || 0), 0) : (meatTotal + water) * 0.2)
-        : 0;
-      const recipeNameForCalc = option.recipe.baseRecipeName || option.recipe.name;
-      const recipeRows = option.recipe.kind === "yamanoya"
-        ? calculateYamanoya(meatTotal)
-        : calculateOwnRecipe(recipeNameForCalc, meatTotal, emulsionWeight, emulsionMode);
-      const recipeTotal = recipeRows.reduce((sum, row) => sum + row.calculated, 0);
-      const finishedWeight = Math.max(Number(elements.recordFinishedWeight.value || 0), 0);
+      const savedCalculation = findSavedRecipeCalculation(elements.recordPrepDate.value, option.category, option.label);
+      const packWeight = savedCalculation && savedCalculation.packWeight != null ? Number(savedCalculation.packWeight) : null;
+      const packPieces = savedCalculation && savedCalculation.packPieces != null ? Number(savedCalculation.packPieces) : null;
+      const packageCount = Number(elements.recordPackageCount.value || 0);
+      const finishedWeight = packWeight == null ? null : packageCount * packWeight;
+      const meatTotal = savedCalculation ? Number(savedCalculation.meatTotal || 0) : 0;
+      const yieldRate = finishedWeight == null || meatTotal <= 0 ? null : finishedWeight / meatTotal * 100;
       return {
         prepDate: elements.recordPrepDate.value,
         date: elements.recordDate.value,
@@ -907,24 +923,22 @@
         recipeId: option.id,
         recipeName: option.label,
         recipeKind: option.recipe.kind,
-        lot: elements.recordLot.value.trim(),
-        staff: elements.recordStaff.value.trim(),
+        lot: generateManufacturingLot(elements.recordDate.value, option.category, option.recipe),
         memo: elements.recordMemo.value.trim(),
-        meat6mm,
-        meat3mm,
+        savedCalculationId: savedCalculation ? savedCalculation.id : "",
+        savedCalculation: Boolean(savedCalculation),
+        meat6mm: savedCalculation ? Number(savedCalculation.meat6mm || 0) : 0,
+        meat3mm: savedCalculation ? Number(savedCalculation.meat3mm || 0) : 0,
         meatTotal,
-        emulsionMode: needsEmulsion ? emulsionMode : "",
-        emulsionWeight,
-        recipeRows,
-        recipeTotal,
-        moldedCount: elements.recordMoldedCount.value,
-        heatedCount: elements.recordHeatedCount.value,
+        emulsionWeight: savedCalculation ? Number(savedCalculation.emulsionWeight || 0) : 0,
+        recipeRows: savedCalculation ? savedCalculation.rows : [],
+        recipeTotal: savedCalculation ? Number(savedCalculation.total || 0) : 0,
         packageCount: elements.recordPackageCount.value,
-        leftoverCount: elements.recordLeftoverCount.value,
         lossCount: elements.recordLossCount.value,
+        packWeight,
+        packPieces,
         finishedWeight,
-        lossWeight: Math.max(Number(elements.recordLossWeight.value || 0), 0),
-        yieldRate: meatTotal > 0 ? finishedWeight / meatTotal * 100 : 0
+        yieldRate
       };
     }
 
@@ -937,22 +951,19 @@
         `製造区分：${record.category || ""}`,
         `レシピ名：${record.recipeName || record.product || ""}`,
         `ロット番号：${record.lot || ""}`,
-        `担当者：${record.staff || ""}`,
         "",
         `6mm肉重量：${formatRecordNumber(record.meat6mm)}g`,
         `3mm肉重量：${formatRecordNumber(record.meat3mm)}g`,
         `肉重量合計：${formatRecordNumber(record.meatTotal)}g`,
         `乳化生地重量：${formatRecordNumber(record.emulsionWeight)}g`,
         "",
-        `成形本数：${record.moldedCount || ""}`,
-        `加熱後本数：${record.heatedCount || ""}`,
         `包装数：${record.packageCount || ""}`,
-        `余り本数：${record.leftoverCount || ""}`,
         `ロス本数：${record.lossCount || ""}`,
         "",
-        `完成重量：${formatRecordNumber(record.finishedWeight)}g`,
-        `ロス重量：${formatRecordNumber(record.lossWeight)}g`,
-        `歩留まり率：${formatRecordNumber(record.yieldRate)}%`,
+        `1パック重量：${record.packWeight == null ? "未設定" : `${formatRecordNumber(record.packWeight)}g`}`,
+        `1パック本数：${record.packPieces == null ? "未設定" : `${record.packPieces}本`}`,
+        `完成重量：${record.finishedWeight == null ? "1パック重量未設定" : `${formatRecordNumber(record.finishedWeight)}g`}`,
+        `歩留まり率：${record.yieldRate == null ? "1パック重量未設定" : `${formatRecordNumber(record.yieldRate)}%`}`,
         "",
         `メモ：${record.memo || ""}`
       ].join("\n");
@@ -982,7 +993,7 @@
               ${records.map((record) => `
                 <button class="menu-button" type="button" data-type="record-detail" data-id="${record.id}">
                   <strong>${escapeHtml(record.date || "日付未入力")} ${escapeHtml(record.recipeName || record.product || "レシピ未入力")}</strong>
-                  <span>${escapeHtml(record.category || "")} / ロット: ${escapeHtml(record.lot || "未入力")} / 包装数: ${escapeHtml(record.packageCount || "0")} / 歩留まり: ${formatRecordNumber(record.yieldRate)}%</span>
+                  <span>${escapeHtml(record.category || "")} / ロット: ${escapeHtml(record.lot || "未入力")} / 包装数: ${escapeHtml(record.packageCount || "0")} / 歩留まり: ${record.yieldRate == null ? "1パック重量未設定" : `${formatRecordNumber(record.yieldRate)}%`}</span>
                 </button>
               `).join("")}
             </div>
@@ -1007,12 +1018,12 @@
             <div>製造区分：${escapeHtml(record.category || "")}</div>
             <div>レシピ名：${escapeHtml(record.recipeName || record.product || "")}</div>
             <div>ロット番号：${escapeHtml(record.lot || "")}</div>
-            <div>担当者：${escapeHtml(record.staff || "")}</div>
-            <div>成形本数：${escapeHtml(record.moldedCount || "")}</div>
             <div>包装数：${escapeHtml(record.packageCount || "")}</div>
-            <div>完成重量：${formatRecordNumber(record.finishedWeight)}g</div>
-            <div>歩留まり率：${formatRecordNumber(record.yieldRate)}%</div>
+            <div>ロス本数：${escapeHtml(record.lossCount || "")}</div>
+            <div>完成重量：${record.finishedWeight == null ? "1パック重量未設定" : `${formatRecordNumber(record.finishedWeight)}g`}</div>
+            <div>歩留まり率：${record.yieldRate == null ? "1パック重量未設定" : `${formatRecordNumber(record.yieldRate)}%`}</div>
           </div>
+          ${record.recipeRows && record.recipeRows.length ? meatInfoHtml({ meat6mm: Number(record.meat6mm || 0), meat3mm: Number(record.meat3mm || 0), meatTotal: Number(record.meatTotal || 0) }) + tableHtml(record.recipeRows, Number(record.recipeTotal || 0)) : ""}
           <div class="copy-area">
             <textarea id="recordDetailText" readonly></textarea>
             <div class="record-actions">
@@ -1046,10 +1057,10 @@
 
     function downloadManufacturingRecordsCsv(records) {
       const rows = records.map((record) => [
-        record.prepDate, record.date, record.category, record.recipeName || record.product, record.lot, record.staff,
+        record.prepDate, record.date, record.category, record.recipeName || record.product, record.lot,
         csvNumber(record.meat6mm), csvNumber(record.meat3mm), csvNumber(record.meatTotal), csvNumber(record.emulsionWeight),
-        record.moldedCount, record.heatedCount, record.packageCount, record.leftoverCount, record.lossCount,
-        csvNumber(record.finishedWeight), csvNumber(record.lossWeight), csvNumber(record.yieldRate), record.memo
+        record.packageCount, record.lossCount, csvNullableNumber(record.packWeight), record.packPieces == null ? "" : record.packPieces,
+        csvNullableNumber(record.finishedWeight), csvNullableNumber(record.yieldRate), record.memo
       ]);
       const csv = [MANUFACTURING_RECORD_CSV_HEADERS, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n");
       const blob = new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" });
@@ -1073,6 +1084,12 @@
     function csvNumber(value) {
       const numeric = Number(value);
       return Number.isFinite(numeric) ? numeric.toFixed(1) : "0.0";
+    }
+
+    function csvNullableNumber(value) {
+      if (value == null || value === "") return "";
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric.toFixed(1) : "";
     }
 
     function formatRecordNumber(value) {
@@ -1177,6 +1194,7 @@
               <input id="${prefix}-meat" type="number" min="0" step="1" value="1000">
             </label>
           ` : ""}
+          <button id="${prefix}-saveCalc" class="secondary" type="button">この計算結果を保存</button>
           <button id="${prefix}-copy" class="primary" type="button">${includeCopy ? "GoodNotes用コピー" : "計算結果をコピー"}</button>
         </div>
         ${isOwn ? `<p class="note">自動計算: 乳化生地 =（肉重量＋水）×0.2 / 手入力: 入力値をそのまま使用</p>` : ""}
@@ -1206,7 +1224,9 @@
       const result = document.getElementById(`${prefix}-result`);
       const copyText = document.getElementById(`${prefix}-copyText`);
       const copyButton = document.getElementById(`${prefix}-copy`);
+      const saveCalcButton = document.getElementById(`${prefix}-saveCalc`);
       const status = document.getElementById(`${prefix}-status`);
+      let latestCalculation = null;
 
       const render = () => {
         const meat6mm = meat6mmInput ? Math.max(Number(meat6mmInput.value || 0), 0) : 0;
@@ -1236,6 +1256,20 @@
         } else {
           copyText.value = buildCopyText(recipe.name, displayRows, displayTotal, "g", productionDateInput.value, splitSelect ? splitLabel : null, splitMeatInfo);
         }
+        latestCalculation = {
+          prepDate: productionDateInput.value,
+          category: recipeRecordCategory(recipe),
+          recipeName: recordRecipeDisplayName(recipe),
+          recipeCode: recipeCodeForRecipe(recipe),
+          recipeKind: recipe.kind,
+          meat6mm,
+          meat3mm,
+          meatTotal: meat,
+          emulsionWeight: recipe.kind === "own" || recipe.kind === "touge" ? emulsion : 0,
+          rows,
+          total,
+          savedAt: new Date().toISOString()
+        };
       };
 
       productionDateInput.addEventListener("input", render);
@@ -1247,6 +1281,10 @@
       if (emulsionManual) emulsionManual.addEventListener("change", render);
       if (splitSelect) splitSelect.addEventListener("change", render);
       copyButton.addEventListener("click", () => copyToClipboard(copyText.value, status));
+      saveCalcButton.addEventListener("click", () => {
+        saveRecipeCalculation(latestCalculation);
+        status.textContent = "計算結果を保存しました";
+      });
       render();
     }
 
@@ -1265,6 +1303,7 @@
           <label>豚ひき肉重量(g)
             <input id="${prefix}-pork" type="number" min="0" step="1" value="3000">
           </label>
+          <button id="${prefix}-saveCalc" class="secondary" type="button">この計算結果を保存</button>
           <button id="${prefix}-copy" class="primary" type="button">${includeCopy ? "GoodNotes用コピー" : "計算結果をコピー"}</button>
         </div>
         <ul class="spec-list">
@@ -1286,7 +1325,9 @@
       const result = document.getElementById(`${prefix}-result`);
       const copyText = document.getElementById(`${prefix}-copyText`);
       const copyButton = document.getElementById(`${prefix}-copy`);
+      const saveCalcButton = document.getElementById(`${prefix}-saveCalc`);
       const status = document.getElementById(`${prefix}-status`);
+      let latestCalculation = null;
 
       const render = () => {
         const deer = Math.max(Number(deerInput.value || 0), 0);
@@ -1295,12 +1336,30 @@
         const total = rows.reduce((sum, row) => sum + row.calculated, 0);
         result.innerHTML = tableHtml(rows, total);
         copyText.value = buildGibierCopyText(recipe, productionDateInput.value, rows, total);
+        latestCalculation = {
+          prepDate: productionDateInput.value,
+          category: "委託製造",
+          recipeName: recordRecipeDisplayName(recipe),
+          recipeCode: recipeCodeForRecipe(recipe),
+          recipeKind: recipe.kind,
+          meat6mm: deer,
+          meat3mm: pork,
+          meatTotal: deer + pork,
+          emulsionWeight: 0,
+          rows,
+          total,
+          savedAt: new Date().toISOString()
+        };
       };
 
       productionDateInput.addEventListener("input", render);
       deerInput.addEventListener("input", render);
       porkInput.addEventListener("input", render);
       copyButton.addEventListener("click", () => copyToClipboard(copyText.value, status));
+      saveCalcButton.addEventListener("click", () => {
+        saveRecipeCalculation(latestCalculation);
+        status.textContent = "計算結果を保存しました";
+      });
       render();
     }
 
