@@ -475,6 +475,14 @@
       chorizo: { name: "チョリソー", description: "自社レシピ", kind: "own" }
     };
 
+    const ownPackagingSpecs = {
+      arabiki: { unit: "袋", countLabel: "包装数", unitWeightLabel: "1袋重量", unitPiecesLabel: "1袋本数", unitWeight: 130, unitPieces: 3 },
+      cheese: { unit: "袋", countLabel: "包装数", unitWeightLabel: "1袋重量", unitPiecesLabel: "1袋本数", unitWeight: 130, unitPieces: 3 },
+      chorizo: { unit: "袋", countLabel: "包装数", unitWeightLabel: "1袋重量", unitPiecesLabel: "1袋本数", unitWeight: 130, unitPieces: 3 },
+      herbProduct: { unit: "袋", countLabel: "包装数", unitWeightLabel: "1袋重量", unitPiecesLabel: "1袋本数", unitWeight: 130, unitPieces: 3 },
+      herbEvent: { unit: "本", countLabel: "完成本数", unitWeightLabel: "1本重量", unitPiecesLabel: "", unitWeight: 80, unitPieces: 1 }
+    };
+
     const outsourceClients = {
       yamanoya: {
         name: "山小屋",
@@ -733,7 +741,7 @@
         <section class="section">
           <h2>製造数記録</h2>
           <div class="field-row">
-            <label>包装数
+            <label id="recordPackageCountLabel">包装数
               <input id="recordPackageCount" type="number" inputmode="numeric" min="0" step="1" value="0">
             </label>
             <label>ロス本数
@@ -756,12 +764,13 @@
     }
 
     function recordRecipeOptions(category = "自社レシピ") {
-      const own = Object.entries(ownRecipes).map(([id, recipe]) => ({
-        id: `own:${id}`,
-        category: "自社レシピ",
-        label: recordRecipeDisplayName(recipe),
-        recipe
-      }));
+      const own = [
+        { id: "own:arabiki", category: "自社レシピ", label: "あらびき", savedRecipeName: "あらびき", packagingKey: "arabiki", recipe: ownRecipes.arabiki },
+        { id: "own:cheese", category: "自社レシピ", label: "チーズ", savedRecipeName: "チーズ", packagingKey: "cheese", recipe: ownRecipes.cheese },
+        { id: "own:herbProduct", category: "自社レシピ", label: "ハーブ（製品用）", savedRecipeName: "ハーブ", packagingKey: "herbProduct", recipe: ownRecipes.herb },
+        { id: "own:herbEvent", category: "自社レシピ", label: "ハーブ（イベント用）", savedRecipeName: "ハーブ", packagingKey: "herbEvent", recipe: ownRecipes.herb },
+        { id: "own:chorizo", category: "自社レシピ", label: "チョリソー", savedRecipeName: "チョリソー", packagingKey: "chorizo", recipe: ownRecipes.chorizo }
+      ];
       const clientOptions = [];
       const yamanoya = outsourceClients.yamanoya;
       clientOptions.push({
@@ -815,6 +824,11 @@
       return recipe.kind === "own" ? "自社レシピ" : "委託製造";
     }
 
+    function packagingSpecForRecordOption(option) {
+      if (!option || option.category !== "自社レシピ") return null;
+      return ownPackagingSpecs[option.packagingKey] || null;
+    }
+
     function loadSavedRecipeCalculations() {
       try {
         const parsed = JSON.parse(localStorage.getItem(SAVED_RECIPE_CALCULATIONS_KEY) || "[]");
@@ -855,6 +869,7 @@
       const elements = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
       const savedCalcStatus = document.getElementById("recordSavedCalcStatus");
       const recipeResult = document.getElementById("recordRecipeResult");
+      const packageCountLabel = document.getElementById("recordPackageCountLabel");
       const packWeightDisplay = document.getElementById("recordPackWeightDisplay");
       const packCountDisplay = document.getElementById("recordPackCountDisplay");
       const finishedWeightDisplay = document.getElementById("recordFinishedWeightDisplay");
@@ -870,6 +885,7 @@
       const render = () => {
         const record = collectManufacturingRecord(elements);
         elements.recordLot.value = record.lot;
+        packageCountLabel.childNodes[0].nodeValue = `${record.packageCountLabel}\n`;
         if (record.savedCalculation) {
           savedCalcStatus.textContent = "保存済みレシピ計算データを反映しました";
           recipeResult.innerHTML = `${meatInfoHtml({ meat6mm: record.meat6mm, meat3mm: record.meat3mm, meatTotal: record.meatTotal })}${tableHtml(record.recipeRows, record.recipeTotal)}`;
@@ -877,10 +893,11 @@
           savedCalcStatus.textContent = "保存済みのレシピ計算データが見つかりません。先にレシピページで計算結果を保存してください。";
           recipeResult.innerHTML = "";
         }
-        packWeightDisplay.textContent = `1パック重量: ${record.packWeight == null ? "未設定" : `${formatRecordNumber(record.packWeight)}g`}`;
-        packCountDisplay.textContent = `1パック本数: ${record.packPieces == null ? "未設定" : `${record.packPieces}本`}`;
-        finishedWeightDisplay.textContent = `完成重量: ${record.finishedWeight == null ? "1パック重量未設定" : `${formatRecordNumber(record.finishedWeight)}g`}`;
-        yieldDisplay.textContent = `歩留まり率: ${record.yieldRate == null ? "1パック重量未設定" : `${formatRecordNumber(record.yieldRate)}%`}`;
+        packWeightDisplay.textContent = `${record.unitWeightLabel}: ${record.packWeight == null ? "未設定" : `${formatRecordNumber(record.packWeight)}g`}`;
+        packCountDisplay.style.display = record.unitPiecesLabel ? "block" : "none";
+        packCountDisplay.textContent = `${record.unitPiecesLabel}: ${record.packPieces == null ? "未設定" : `${record.packPieces}本`}`;
+        finishedWeightDisplay.textContent = `完成重量: ${record.finishedWeight == null ? `${record.unitWeightLabel}未設定` : `${formatRecordNumber(record.finishedWeight)}g`}`;
+        yieldDisplay.textContent = `歩留まり率: ${record.yieldRate == null ? `${record.unitWeightLabel}未設定` : `${formatRecordNumber(record.yieldRate)}%`}`;
         goodNotesText.value = buildManufacturingRecordText(record);
       };
 
@@ -909,9 +926,10 @@
 
     function collectManufacturingRecord(elements) {
       const option = getRecordRecipeOption(elements.recordRecipe.value, elements.recordCategory.value);
-      const savedCalculation = findSavedRecipeCalculation(elements.recordPrepDate.value, option.category, option.label);
-      const packWeight = savedCalculation && savedCalculation.packWeight != null ? Number(savedCalculation.packWeight) : null;
-      const packPieces = savedCalculation && savedCalculation.packPieces != null ? Number(savedCalculation.packPieces) : null;
+      const savedCalculation = findSavedRecipeCalculation(elements.recordPrepDate.value, option.category, option.savedRecipeName || option.label);
+      const packagingSpec = packagingSpecForRecordOption(option);
+      const packWeight = packagingSpec ? packagingSpec.unitWeight : null;
+      const packPieces = packagingSpec ? packagingSpec.unitPieces : null;
       const packageCount = Number(elements.recordPackageCount.value || 0);
       const finishedWeight = packWeight == null ? null : packageCount * packWeight;
       const meatTotal = savedCalculation ? Number(savedCalculation.meatTotal || 0) : 0;
@@ -922,6 +940,12 @@
         category: option.category,
         recipeId: option.id,
         recipeName: option.label,
+        savedRecipeName: option.savedRecipeName || option.label,
+        packagingKey: option.packagingKey || "",
+        packagingUnit: packagingSpec ? packagingSpec.unit : "",
+        packageCountLabel: packagingSpec ? packagingSpec.countLabel : "包装数",
+        unitWeightLabel: packagingSpec ? packagingSpec.unitWeightLabel : "1パック重量",
+        unitPiecesLabel: packagingSpec ? packagingSpec.unitPiecesLabel : "1パック本数",
         recipeKind: option.recipe.kind,
         lot: generateManufacturingLot(elements.recordDate.value, option.category, option.recipe),
         memo: elements.recordMemo.value.trim(),
@@ -943,7 +967,7 @@
     }
 
     function buildManufacturingRecordText(record) {
-      return [
+      const lines = [
         "【製造記録】",
         "",
         `仕込み日：${record.prepDate || ""}`,
@@ -957,16 +981,21 @@
         `肉重量合計：${formatRecordNumber(record.meatTotal)}g`,
         `乳化生地重量：${formatRecordNumber(record.emulsionWeight)}g`,
         "",
-        `包装数：${record.packageCount || ""}`,
+        `${record.packageCountLabel || "包装数"}：${record.packageCount || ""}`,
         `ロス本数：${record.lossCount || ""}`,
         "",
-        `1パック重量：${record.packWeight == null ? "未設定" : `${formatRecordNumber(record.packWeight)}g`}`,
-        `1パック本数：${record.packPieces == null ? "未設定" : `${record.packPieces}本`}`,
-        `完成重量：${record.finishedWeight == null ? "1パック重量未設定" : `${formatRecordNumber(record.finishedWeight)}g`}`,
-        `歩留まり率：${record.yieldRate == null ? "1パック重量未設定" : `${formatRecordNumber(record.yieldRate)}%`}`,
+        `${record.unitWeightLabel || "1パック重量"}：${record.packWeight == null ? "未設定" : `${formatRecordNumber(record.packWeight)}g`}`,
+      ];
+      if (record.unitPiecesLabel) {
+        lines.push(`${record.unitPiecesLabel}：${record.packPieces == null ? "未設定" : `${record.packPieces}本`}`);
+      }
+      lines.push(
+        `完成重量：${record.finishedWeight == null ? `${record.unitWeightLabel || "1パック重量"}未設定` : `${formatRecordNumber(record.finishedWeight)}g`}`,
+        `歩留まり率：${record.yieldRate == null ? `${record.unitWeightLabel || "1パック重量"}未設定` : `${formatRecordNumber(record.yieldRate)}%`}`,
         "",
         `メモ：${record.memo || ""}`
-      ].join("\n");
+      );
+      return lines.join("\n");
     }
 
     function loadManufacturingRecords() {
@@ -993,7 +1022,7 @@
               ${records.map((record) => `
                 <button class="menu-button" type="button" data-type="record-detail" data-id="${record.id}">
                   <strong>${escapeHtml(record.date || "日付未入力")} ${escapeHtml(record.recipeName || record.product || "レシピ未入力")}</strong>
-                  <span>${escapeHtml(record.category || "")} / ロット: ${escapeHtml(record.lot || "未入力")} / 包装数: ${escapeHtml(record.packageCount || "0")} / 歩留まり: ${record.yieldRate == null ? "1パック重量未設定" : `${formatRecordNumber(record.yieldRate)}%`}</span>
+                  <span>${escapeHtml(record.category || "")} / ロット: ${escapeHtml(record.lot || "未入力")} / ${escapeHtml(record.packageCountLabel || "包装数")}: ${escapeHtml(record.packageCount || "0")} / 歩留まり: ${record.yieldRate == null ? `${record.unitWeightLabel || "1パック重量"}未設定` : `${formatRecordNumber(record.yieldRate)}%`}</span>
                 </button>
               `).join("")}
             </div>
@@ -1018,10 +1047,10 @@
             <div>製造区分：${escapeHtml(record.category || "")}</div>
             <div>レシピ名：${escapeHtml(record.recipeName || record.product || "")}</div>
             <div>ロット番号：${escapeHtml(record.lot || "")}</div>
-            <div>包装数：${escapeHtml(record.packageCount || "")}</div>
+            <div>${escapeHtml(record.packageCountLabel || "包装数")}：${escapeHtml(record.packageCount || "")}</div>
             <div>ロス本数：${escapeHtml(record.lossCount || "")}</div>
-            <div>完成重量：${record.finishedWeight == null ? "1パック重量未設定" : `${formatRecordNumber(record.finishedWeight)}g`}</div>
-            <div>歩留まり率：${record.yieldRate == null ? "1パック重量未設定" : `${formatRecordNumber(record.yieldRate)}%`}</div>
+            <div>完成重量：${record.finishedWeight == null ? `${record.unitWeightLabel || "1パック重量"}未設定` : `${formatRecordNumber(record.finishedWeight)}g`}</div>
+            <div>歩留まり率：${record.yieldRate == null ? `${record.unitWeightLabel || "1パック重量"}未設定` : `${formatRecordNumber(record.yieldRate)}%`}</div>
           </div>
           ${record.recipeRows && record.recipeRows.length ? meatInfoHtml({ meat6mm: Number(record.meat6mm || 0), meat3mm: Number(record.meat3mm || 0), meatTotal: Number(record.meatTotal || 0) }) + tableHtml(record.recipeRows, Number(record.recipeTotal || 0)) : ""}
           <div class="copy-area">
