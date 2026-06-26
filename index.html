@@ -1655,16 +1655,21 @@
         <section class="section">
           <h2>CSV出力</h2>
           <div class="empty">保存済み製造記録：${records.length}件</div>
+          <p class="note">OneDrive保存時は、共有画面から OneDrive / 製造管理 / CSV / 未取込 を選択してください。</p>
           <div class="record-actions">
-            <button id="recordCsvDownload" class="primary" type="button" ${records.length === 0 ? "disabled" : ""}>CSVをダウンロード</button>
+            <button id="recordCsvDownload" class="primary" type="button" ${records.length === 0 ? "disabled" : ""}>CSVを保存</button>
+            <button id="recordCsvOneDrive" class="secondary" type="button" ${records.length === 0 ? "disabled" : ""}>OneDriveへ保存</button>
+            <button id="recordCsvGoodNotes" class="secondary" type="button" ${records.length === 0 ? "disabled" : ""}>GoodNotes転記</button>
           </div>
           <div id="recordCsvStatus" class="status"></div>
         </section>
       `;
       document.getElementById("recordCsvDownload").addEventListener("click", () => downloadManufacturingRecordsCsv(records));
+      document.getElementById("recordCsvOneDrive").addEventListener("click", () => shareManufacturingRecordsCsv(records));
+      document.getElementById("recordCsvGoodNotes").addEventListener("click", () => copyManufacturingRecordsCsv(records));
     }
 
-    function downloadManufacturingRecordsCsv(records) {
+    function buildManufacturingRecordsCsv(records) {
       const rows = records.map((record) => [
         record.prepDate, record.date, record.category, record.recipeName || record.product, record.lot,
         csvNumber(record.meat6mm), csvNumber(record.meat3mm), csvNumber(record.meatTotal), csvNumber(record.waterAmount),
@@ -1672,18 +1677,55 @@
         record.packageCount || "", record.completedCount || "", record.lossCount, csvNumber(record.leftoverWeight || 0),
         csvNullableNumber(record.finishedWeight), csvNullableNumber(record.yieldRate), record.memo
       ]);
-      const csv = [MANUFACTURING_RECORD_CSV_HEADERS, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n");
-      const blob = new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" });
+      return [MANUFACTURING_RECORD_CSV_HEADERS, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n");
+    }
+
+    function manufacturingCsvFileName(records) {
+      const first = records[0] || {};
+      const datePart = String(first.date || todayString()).replace(/-/g, "");
+      const recipePart = String(first.recipeName || first.product || "全件").replace(/[\\/:*?"<>|\s]/g, "_");
+      return `製造記録_${datePart}_${recipePart}.csv`;
+    }
+
+    function manufacturingCsvBlob(records) {
+      return new Blob(["\ufeff", buildManufacturingRecordsCsv(records)], { type: "text/csv;charset=utf-8" });
+    }
+
+    function downloadManufacturingRecordsCsv(records) {
+      const blob = manufacturingCsvBlob(records);
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `manufacturing-records-${todayString()}.csv`;
+      link.download = manufacturingCsvFileName(records);
       document.body.appendChild(link);
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
       const status = document.getElementById("recordCsvStatus");
-      if (status) status.textContent = "CSVを出力しました";
+      if (status) status.textContent = "CSVを保存しました。必要に応じてOneDriveの「製造管理 / CSV / 未取込」フォルダへ移動してください。";
+    }
+
+    async function shareManufacturingRecordsCsv(records) {
+      const status = document.getElementById("recordCsvStatus");
+      const fileName = manufacturingCsvFileName(records);
+      const file = new File([manufacturingCsvBlob(records)], fileName, { type: "text/csv" });
+      if (status) status.textContent = "共有画面が開きます。OneDriveの「製造管理 / CSV / 未取込」へ保存してください。";
+      try {
+        if (navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
+          await navigator.share({ files: [file], title: "製造記録CSV", text: "OneDrive / 製造管理 / CSV / 未取込 へ保存してください。" });
+        } else {
+          downloadManufacturingRecordsCsv(records);
+          if (status) status.textContent = "共有機能が使えないためCSVを保存しました。OneDriveの「製造管理 / CSV / 未取込」フォルダへ移動してください。";
+        }
+      } catch (error) {
+        if (error && error.name === "AbortError") return;
+        downloadManufacturingRecordsCsv(records);
+        if (status) status.textContent = "共有保存できませんでした。CSVを保存後、OneDriveの「製造管理 / CSV / 未取込」フォルダへ移動してください。";
+      }
+    }
+
+    function copyManufacturingRecordsCsv(records) {
+      copyToClipboard(buildManufacturingRecordsCsv(records), document.getElementById("recordCsvStatus"));
     }
 
     function csvCell(value) {
