@@ -391,6 +391,22 @@
       font-weight: 800;
     }
 
+    .status.notice {
+      min-height: auto;
+      padding: 10px 12px;
+      background: #eaf4ff;
+      border: 1px solid #b8d7ff;
+      border-radius: 12px;
+    }
+
+    .status.error {
+      min-height: auto;
+      padding: 10px 12px;
+      background: var(--warn);
+      border: 1px solid #ffd0c2;
+      border-radius: 12px;
+    }
+
     .empty {
       padding: 20px;
       background: var(--warn);
@@ -1734,7 +1750,7 @@
       const usesSplitMeatInput = isOwn || recipe.kind === "yamanoya";
       return `
         <div class="field-row">
-          <label>製造日
+          <label>仕込日
             <input id="${prefix}-productionDate" type="date" value="${todayString()}">
           </label>
         </div>
@@ -1867,9 +1883,9 @@
       saveCalcButton.addEventListener("click", () => {
         try {
           saveRecipeCalculation(latestCalculation);
-          status.textContent = "計算結果を保存しました";
+          showTemporaryStatus(status, "計算結果を保存しました");
         } catch (error) {
-          status.textContent = "保存に失敗しました";
+          showTemporaryStatus(status, "保存できませんでした", "error");
         }
       });
       render();
@@ -1878,7 +1894,7 @@
     function gibierCalculatorContentHtml(recipe, prefix, includeCopy) {
       return `
         <div class="field-row">
-          <label>製造日
+          <label>仕込日
             <input id="${prefix}-productionDate" type="date" value="${todayString()}">
           </label>
         </div>
@@ -1947,9 +1963,9 @@
       saveCalcButton.addEventListener("click", () => {
         try {
           saveRecipeCalculation(latestCalculation);
-          status.textContent = "計算結果を保存しました";
+          showTemporaryStatus(status, "計算結果を保存しました");
         } catch (error) {
-          status.textContent = "保存に失敗しました";
+          showTemporaryStatus(status, "保存できませんでした", "error");
         }
       });
       render();
@@ -2535,7 +2551,22 @@
       ];
     }
 
+    function showTemporaryStatus(statusElement, message, type = "notice") {
+      if (!statusElement) return;
+      statusElement.textContent = message;
+      statusElement.classList.remove("notice", "error");
+      statusElement.classList.add(type === "error" ? "error" : "notice");
+      clearTimeout(statusElement.dataset.timerId);
+      const timerId = setTimeout(() => {
+        statusElement.textContent = "";
+        statusElement.classList.remove("notice", "error");
+        delete statusElement.dataset.timerId;
+      }, 2500);
+      statusElement.dataset.timerId = String(timerId);
+    }
+
     async function copyToClipboard(text, statusElement) {
+      if (!statusElement) return;
       try {
         await navigator.clipboard.writeText(text);
         statusElement.textContent = "コピーしました";
