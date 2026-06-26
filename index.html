@@ -637,15 +637,26 @@
       return Array.isArray(rows) ? rows.reduce((sum, row) => sum + Number(row.calculated || 0), 0) : 0;
     }
 
+    function isMeatInputRow(row) {
+      return ["肉重量", "鹿肉重量", "豚ひき肉重量"].includes(row.name);
+    }
+
+    function sumIngredientRows(rows) {
+      return Array.isArray(rows)
+        ? rows.filter((row) => !isMeatInputRow(row)).reduce((sum, row) => sum + Number(row.calculated || 0), 0)
+        : 0;
+    }
+
     function enrichSavedRecipeCalculation(record) {
       const rows = Array.isArray(record.rows) ? record.rows : [];
       const meatTotal = Number(record.meatTotal || 0);
       const emulsionWeight = Number(record.emulsionWeight || 0);
       const recipeMaterialTotal = Number(record.total != null ? record.total : sumRows(rows));
-      const waterAmount = Number(record.waterAmount != null ? record.waterAmount : amountFromRows(rows, "水"));
-      const totalWeight = Number(record.totalWeight != null ? record.totalWeight : meatTotal + recipeMaterialTotal);
-      const otherMaterialTotal = Number(record.otherMaterialTotal != null ? record.otherMaterialTotal : Math.max(recipeMaterialTotal - waterAmount - emulsionWeight, 0));
-      const theoreticalFinishedWeight = Number(record.theoreticalFinishedWeight != null ? record.theoreticalFinishedWeight : totalWeight);
+      const ingredientTotal = sumIngredientRows(rows);
+      const waterAmount = Number(amountFromRows(rows, "水"));
+      const totalWeight = meatTotal + ingredientTotal;
+      const otherMaterialTotal = Math.max(ingredientTotal - waterAmount - emulsionWeight, 0);
+      const theoreticalFinishedWeight = totalWeight;
       const packagingSpec = record.packagingKey ? ownPackagingSpecs[record.packagingKey] : null;
       return {
         ...record,
@@ -1397,9 +1408,10 @@
         const recipeRows = Array.isArray(item.recipeRows) ? item.recipeRows : [];
         const recipeTotal = Number(item.recipeTotal != null ? item.recipeTotal : sumRows(recipeRows));
         const meatTotal = Number(item.meatTotal || 0);
-        const waterAmount = Number(item.waterAmount != null ? item.waterAmount : amountFromRows(recipeRows, "水"));
-        const totalWeight = Number(item.totalWeight != null ? item.totalWeight : meatTotal + recipeTotal);
-        const theoreticalFinishedWeight = Number(item.theoreticalFinishedWeight != null ? item.theoreticalFinishedWeight : totalWeight);
+        const waterAmount = Number(amountFromRows(recipeRows, "水"));
+        const ingredientTotal = sumIngredientRows(recipeRows);
+        const totalWeight = meatTotal + ingredientTotal;
+        const theoreticalFinishedWeight = totalWeight;
         const finishedWeight = item.finishedWeight == null || item.finishedWeight === "" ? null : Number(item.finishedWeight);
         const yieldRate = finishedWeight == null || theoreticalFinishedWeight <= 0 ? null : finishedWeight / theoreticalFinishedWeight * 100;
         const normalizedItem = {
