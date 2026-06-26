@@ -469,6 +469,8 @@
     const OLD_MANUFACTURING_RECORDS_KEY = "meatRecipeApp.manufacturingRecords.v1";
     const OLD_SAVED_RECIPE_CALCULATIONS_KEY = "meatRecipeApp.savedRecipeCalculations.v1";
     const MANUFACTURING_RECORD_CSV_HEADERS = ["仕込み日", "製造日", "製造区分", "レシピ名", "ロット番号", "6mm肉重量", "3mm肉重量", "肉重量合計", "水", "乳化生地重量", "合計重量", "包装単位", "包装数", "完成本数", "ロス本数", "余り重量", "完成重量", "歩留まり率", "メモ"];
+    const SCREEN_STATE_KEY = "meatRecipeApp.screenState.v1";
+    let currentScreenState = null;
 
     const ownRecipes = {
       arabiki: { name: "あらびき", description: "自社レシピ", kind: "own" },
@@ -648,6 +650,96 @@
       return record.yieldRate == null ? "計算不可" : `${formatRecordNumber(record.yieldRate)}%`;
     }
 
+    function supportedRestoreScreen(screen) {
+      return ["recordTop", "recordForm", "savedRecipeList", "recordHistory"].includes(screen);
+    }
+
+    function saveScreenState(screen, hierarchy = [], form = {}) {
+      const state = { screen, hierarchy, form, savedAt: new Date().toISOString() };
+      currentScreenState = state;
+      try {
+        localStorage.setItem(SCREEN_STATE_KEY, JSON.stringify(state));
+      } catch (error) {
+        // State restore is helpful but must not block recipe or record work.
+      }
+    }
+
+    function loadScreenState() {
+      try {
+        const parsed = JSON.parse(localStorage.getItem(SCREEN_STATE_KEY) || "null");
+        return parsed && supportedRestoreScreen(parsed.screen) ? parsed : null;
+      } catch (error) {
+        return null;
+      }
+    }
+
+    function clearScreenState() {
+      currentScreenState = null;
+      try {
+        localStorage.removeItem(SCREEN_STATE_KEY);
+      } catch (error) {
+        // Ignore storage errors when clearing optional draft state.
+      }
+    }
+
+    function recordFormDraftValues() {
+      const ids = ["recordPrepDate", "recordDate", "recordCategory", "recordRecipe", "recordLot", "recordMemo", "recordPackageCount", "recordLossCount", "recordLeftoverWeight"];
+      const values = {};
+      ids.forEach((id) => {
+        const element = document.getElementById(id);
+        if (element) values[id] = element.value;
+      });
+      return values;
+    }
+
+    function persistCurrentScreenState() {
+      if (!currentScreenState) return;
+      if (currentScreenState.screen === "recordForm") {
+        saveScreenState("recordForm", ["home", "records", "new"], recordFormDraftValues());
+        return;
+      }
+      saveScreenState(currentScreenState.screen, currentScreenState.hierarchy || [], currentScreenState.form || {});
+    }
+
+    function showRestorePrompt(state) {
+      setHeader("食肉加工 配合・製造管理", "前回の作業を復元できます", false);
+      app.innerHTML = `
+        <section class="section">
+          <h2>前回の画面を復元しますか？</h2>
+          <p class="note">別アプリへ切り替える前の画面と入力途中の内容を復元できます。</p>
+          <div class="record-actions">
+            <button id="restoreScreenState" class="primary" type="button">復元する</button>
+            <button id="discardScreenState" class="secondary" type="button">ホームへ戻る</button>
+          </div>
+        </section>
+      `;
+      document.getElementById("restoreScreenState").addEventListener("click", () => restoreScreenState(state));
+      document.getElementById("discardScreenState").addEventListener("click", () => {
+        clearScreenState();
+        showHome();
+      });
+    }
+
+    function restoreScreenState(state) {
+      if (!state || !supportedRestoreScreen(state.screen)) {
+        showHome();
+        return;
+      }
+      if (state.screen === "recordTop") showManufacturingRecordTop();
+      if (state.screen === "recordForm") showManufacturingRecordForm(state.form || {});
+      if (state.screen === "savedRecipeList") showSavedRecipeList();
+      if (state.screen === "recordHistory") showManufacturingRecordHistory();
+    }
+
+    function initApp() {
+      const state = loadScreenState();
+      if (state) {
+        showRestorePrompt(state);
+        return;
+      }
+      showHome();
+    }
+
     function createButton(item) {
       const button = document.createElement("button");
       button.type = "button";
@@ -676,6 +768,7 @@
     });
 
     function showHome() {
+      clearScreenState();
       setHeader("食肉加工 配合・製造管理", "単体HTML / iPad・iPhone・Windows共通", false);
       const cards = [
         { label: "自社レシピ", description: "あらびき・チーズ・ハーブ・チョリソー", type: "category", id: "own" },
@@ -740,6 +833,7 @@
     }
 
     function showManufacturingRecordTop() {
+      saveScreenState("recordTop", ["home", "records"]);
       setHeader("製造記録", "記録・履歴・CSV出力", true, showHome);
       const items = [
         { label: "新規製造記録", description: "製造内容を入力して保存", type: "record-new", id: "new" },
@@ -761,7 +855,8 @@
       `;
     }
 
-    function showManufacturingRecordForm() {
+    function showManufacturingRecordForm(draft = {}) {
+      saveScreenState("recordForm", ["home", "records", "new"], draft);
       setHeader("新規製造記録", "既存レシピから記録", true, showManufacturingRecordTop);
       app.innerHTML = `
         <section class="section">
@@ -820,7 +915,7 @@
           </div>
         </section>
       `;
-      bindManufacturingRecordForm();
+      bindManufacturingRecordForm(draft);
     }
 
     function recordRecipeOptions(category = "自社レシピ") {
@@ -951,6 +1046,7 @@
     }
 
     function showSavedRecipeList(message = "") {
+      saveScreenState("savedRecipeList", ["home", "records", "savedRecipeList"]);
       setHeader("保存済みレシピ確認", "計算結果の確認・編集", true, showManufacturingRecordTop);
       const records = loadSavedRecipeCalculations();
       app.innerHTML = `
@@ -1104,7 +1200,7 @@
       }
     }
 
-    function bindManufacturingRecordForm() {
+    function bindManufacturingRecordForm(draft = {}) {
       const ids = [
         "recordPrepDate", "recordDate", "recordCategory", "recordRecipe", "recordLot", "recordMemo",
         "recordPackageCount", "recordLossCount", "recordLeftoverWeight"
@@ -1125,6 +1221,15 @@
         elements.recordRecipe.innerHTML = options.map((option) => `<option value="${option.id}">${option.label}</option>`).join("");
       };
 
+      const applyDraft = () => {
+        if (!draft || Object.keys(draft).length === 0) return;
+        if (draft.recordCategory) elements.recordCategory.value = draft.recordCategory;
+        refreshRecipeOptions();
+        ids.forEach((id) => {
+          if (draft[id] != null && elements[id]) elements[id].value = draft[id];
+        });
+      };
+
       const render = () => {
         const record = collectManufacturingRecord(elements);
         elements.recordLot.value = record.lot;
@@ -1142,9 +1247,11 @@
         finishedWeightDisplay.textContent = `完成重量: ${record.finishedWeight == null ? "計算不可" : `${formatRecordNumber(record.finishedWeight)}g`}`;
         yieldDisplay.textContent = `歩留まり率: ${yieldDisplayText(record)}`;
         goodNotesText.value = buildManufacturingRecordText(record);
+        saveScreenState("recordForm", ["home", "records", "new"], recordFormDraftValues());
       };
 
       refreshRecipeOptions();
+      applyDraft();
       elements.recordCategory.addEventListener("change", () => {
         refreshRecipeOptions();
         render();
@@ -1165,6 +1272,7 @@
         records.unshift(record);
         try {
           saveManufacturingRecords(records);
+          clearScreenState();
           goodNotesText.value = buildManufacturingRecordText(record);
           status.textContent = "保存しました";
         } catch (error) {
@@ -1309,6 +1417,7 @@
     }
 
     function showManufacturingRecordHistory(backHandler = showManufacturingRecordTop, message = "") {
+      saveScreenState("recordHistory", ["home", "records", "history"]);
       setHeader("製造記録履歴", "保存した記録", true, backHandler);
       const records = loadManufacturingRecords();
       app.innerHTML = `
@@ -2435,7 +2544,12 @@
       }
     }
 
-    showHome();
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") persistCurrentScreenState();
+    });
+    window.addEventListener("beforeunload", persistCurrentScreenState);
+
+    initApp();
   </script>
 </body>
 </html>
