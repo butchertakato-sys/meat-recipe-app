@@ -242,6 +242,27 @@
       padding: 0;
     }
 
+    .toge-allocation-checkbox {
+      width: 56px;
+      min-height: 56px;
+      height: 56px;
+      flex: 0 0 56px;
+      margin: 0 -22.4px 0 0;
+      transform: scale(0.6);
+      transform-origin: left center;
+      vertical-align: middle;
+    }
+
+    .toge-allocation-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      width: fit-content;
+      min-height: 56px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
     label {
       display: grid;
       gap: 6px;
@@ -586,7 +607,7 @@
       },
       {
         title: "委託製造",
-        items: Object.entries(outsourceClients).map(([id, client]) => ({ label: client.name, description: client.description, type: "client", id }))
+        items: Object.entries(outsourceClients).filter(([id]) => id !== "touge").map(([id, client]) => ({ label: client.name, description: client.description, type: "client", id }))
       },
       {
         title: "管理・計算",
@@ -724,7 +745,7 @@
     }
 
     function supportedRestoreScreen(screen) {
-      return ["recordTop", "recordForm", "savedRecipeList", "recordHistory"].includes(screen);
+      return ["recordTop", "unregisteredRecipeList", "recordForm", "savedRecipeList", "recordHistory"].includes(screen);
     }
 
     function saveScreenState(screen, hierarchy = [], form = {}) {
@@ -756,11 +777,11 @@
     }
 
     function recordFormDraftValues() {
-      const ids = ["recordPrepDate", "recordDate", "recordCategory", "recordRecipe", "recordLot", "recordMemo", "recordPackageCount", "recordSmokedCount", "recordUnsmokedCount", "recordLossCount", "recordLeftoverWeight"];
+      const ids = ["recordSavedRecipeId", "recordPrepDate", "recordDate", "recordCategory", "recordRecipe", "recordLot", "recordMemo", "recordPackageCount", "recordSmokedCount", "recordUnsmokedCount", "recordLossCount", "recordLeftoverWeight", "recordTogeAllocationEnabled", "recordTogeAllocationId", "recordTogeGeneratedId", "recordTogePieceCount"];
       const values = {};
       ids.forEach((id) => {
         const element = document.getElementById(id);
-        if (element) values[id] = element.value;
+        if (element) values[id] = element.type === "checkbox" ? element.checked : element.value;
       });
       return values;
     }
@@ -799,7 +820,8 @@
         return;
       }
       if (state.screen === "recordTop") showManufacturingRecordTop();
-      if (state.screen === "recordForm") showManufacturingRecordForm(state.form || {});
+      if (state.screen === "unregisteredRecipeList") showUnregisteredSavedRecipeList();
+      if (state.screen === "recordForm") showManufacturingRecordForm(state.form || {}, state.form && state.form.recordSavedRecipeId ? showUnregisteredSavedRecipeList : showManufacturingRecordTop);
       if (state.screen === "savedRecipeList") showSavedRecipeList();
       if (state.screen === "recordHistory") showManufacturingRecordHistory();
     }
@@ -832,7 +854,8 @@
       if (type === "client") showClient(id);
       if (type === "curing") showCuring(id);
       if (type === "emulsion") showEmulsion();
-      if (type === "record-new") showManufacturingRecordForm();
+      if (type === "record-new") showUnregisteredSavedRecipeList();
+      if (type === "record-from-saved") showManufacturingRecordFromSavedRecipe(id);
       if (type === "saved-recipe-list") showSavedRecipeList();
       if (type === "saved-recipe-detail") showSavedRecipeDetail(id);
       if (type === "record-history") showManufacturingRecordHistory();
@@ -844,10 +867,10 @@
       clearScreenState();
       setHeader("食肉加工 配合・製造管理", "単体HTML / iPad・iPhone・Windows共通", false);
       const cards = [
-        { label: "自社レシピ", description: "あらびき・チーズ・ハーブ・チョリソー", type: "category", id: "own" },
-        { label: "委託製造", description: "山小屋・ジビエセンター", type: "category", id: "clients" },
-        { label: "乳化生地", description: "豚肉のみ / 豚肉＋豚脂", type: "emulsion", id: "emulsion" },
-        { label: "熟成管理", description: "ベーコン・生ハム", type: "category", id: "curing" },
+        { label: "自社レシピ", type: "category", id: "own" },
+        { label: "委託製造", type: "category", id: "clients" },
+        { label: "乳化生地", type: "emulsion", id: "emulsion" },
+        { label: "熟成管理", type: "category", id: "curing" },
         { label: "製造記録", description: "記録・履歴・CSV", type: "category", id: "records" },
         { label: "履歴一覧", description: "製造記録の確認", type: "category", id: "history" }
       ];
@@ -857,7 +880,7 @@
           <div class="grid home-grid">
             ${cards.map((item) => `
               <button class="menu-button" type="button" data-type="${item.type}" data-id="${item.id}">
-                <strong>${item.label}</strong><span>${item.description}</span>
+                <strong>${item.label}</strong>${item.description ? `<span>${item.description}</span>` : ""}
               </button>
             `).join("")}
           </div>
@@ -928,10 +951,90 @@
       `;
     }
 
-    function showManufacturingRecordForm(draft = {}) {
-      saveScreenState("recordForm", ["home", "records", "new"], draft);
-      setHeader("新規製造記録", "既存レシピから記録", true, showManufacturingRecordTop);
+    function showUnregisteredSavedRecipeList() {
+      saveScreenState("unregisteredRecipeList", ["home", "records", "new"]);
+      setHeader("製造記録が未登録のレシピ", "保存済みレシピから選択", true, showManufacturingRecordTop);
+      const savedRecipes = loadSavedRecipeCalculations();
+      const manufacturingRecords = loadManufacturingRecords();
+      const unregistered = savedRecipes
+        .filter((record) => record.recipeKind !== "touge" && !isSavedRecipeRegistered(record, savedRecipes, manufacturingRecords))
+        .sort((a, b) => {
+          const dateOrder = String(b.prepDate || "").localeCompare(String(a.prepDate || ""));
+          if (dateOrder !== 0) return dateOrder;
+          return String(b.createdAt || b.savedAt || b.updatedAt || "").localeCompare(String(a.createdAt || a.savedAt || a.updatedAt || ""));
+        });
       app.innerHTML = `
+        <section class="section">
+          <h2>製造記録が未登録のレシピ</h2>
+          ${unregistered.length === 0 ? `<div class="empty">製造記録が未登録のレシピはありません。</div>` : `
+            <div class="grid menu-grid">
+              ${unregistered.map((record) => `
+                <button class="menu-button" type="button" data-type="record-from-saved" data-id="${escapeHtml(savedRecipeRecordId(record))}">
+                  <strong>${escapeHtml(formatListDate(record.prepDate))}　${escapeHtml(record.recipeName || record.savedRecipeName || "品目名未入力")}</strong>
+                  <span>${escapeHtml(record.category === "自社レシピ" ? "自社" : "委託")} / ロット：${escapeHtml(savedRecipeLotDisplay(record))}</span>
+                </button>
+              `).join("")}
+            </div>
+          `}
+        </section>
+      `;
+    }
+
+    function formatListDate(value) {
+      return value ? String(value).replace(/-/g, "/") : "仕込日未入力";
+    }
+
+    function savedRecipeLotDisplay(record) {
+      return record.lot || "製造記録作成時に採番";
+    }
+
+    function savedRecipeLegacyKey(record) {
+      return [record.prepDate || "", record.category || "", record.savedRecipeName || record.recipeName || "", record.recipeCode || "", record.packagingKey || ""].join("|");
+    }
+
+    function isSavedRecipeRegistered(savedRecipe, savedRecipes, manufacturingRecords) {
+      const savedId = savedRecipeRecordId(savedRecipe);
+      if (savedId && manufacturingRecords.some((record) => record.savedRecipeId === savedId || record.savedCalculationId === savedId)) return true;
+      if (savedRecipe.lot && manufacturingRecords.some((record) => record.lot && record.lot === savedRecipe.lot)) return true;
+      const legacyKey = savedRecipeLegacyKey(savedRecipe);
+      const matchingSaved = savedRecipes.filter((record) => savedRecipeLegacyKey(record) === legacyKey);
+      const matchingManufacturing = manufacturingRecords.filter((record) => savedRecipeLegacyKey(record) === legacyKey && !record.savedRecipeId && !record.savedCalculationId);
+      return matchingSaved.length === 1 && matchingManufacturing.length === 1;
+    }
+
+    function recordOptionForSavedRecipe(savedRecipe) {
+      const options = recordRecipeOptions(savedRecipe.category || "自社レシピ");
+      return options.find((option) => savedRecipe.packagingKey && option.packagingKey === savedRecipe.packagingKey)
+        || options.find((option) => savedRecipe.recipeCode && recipeCodeForRecipe(option.recipe) === savedRecipe.recipeCode && (option.savedRecipeName || option.label) === (savedRecipe.savedRecipeName || savedRecipe.recipeName))
+        || options.find((option) => (option.savedRecipeName || option.label) === (savedRecipe.savedRecipeName || savedRecipe.recipeName))
+        || options.find((option) => option.label === savedRecipe.recipeName)
+        || options[0];
+    }
+
+    function showManufacturingRecordFromSavedRecipe(savedRecipeId) {
+      const savedRecipe = loadSavedRecipeCalculations().find((record) => savedRecipeRecordId(record) === savedRecipeId);
+      if (!savedRecipe) {
+        showUnregisteredSavedRecipeList();
+        showSaveToast("保存済みレシピが見つかりません。", "error");
+        return;
+      }
+      const option = recordOptionForSavedRecipe(savedRecipe);
+      showManufacturingRecordForm({
+        recordSavedRecipeId: savedRecipeId,
+        recordPrepDate: savedRecipe.prepDate || todayString(),
+        recordDate: todayString(),
+        recordCategory: option.category,
+        recordRecipe: option.id,
+        recordLot: savedRecipe.lot || "",
+        recordMemo: savedRecipe.memo || ""
+      }, showUnregisteredSavedRecipeList);
+    }
+
+    function showManufacturingRecordForm(draft = {}, backHandler = showManufacturingRecordTop) {
+      saveScreenState("recordForm", ["home", "records", "new"], draft);
+      setHeader("新規製造記録", "既存レシピから記録", true, backHandler);
+      app.innerHTML = `
+        <input id="recordSavedRecipeId" type="hidden" value="${escapeHtml(draft.recordSavedRecipeId || "")}">
         <section class="section">
           <h2>基本情報</h2>
           <div class="field-row">
@@ -981,6 +1084,21 @@
             <label>余り重量(g)
               <input id="recordLeftoverWeight" type="number" inputmode="decimal" min="0" step="0.1" value="0">
             </label>
+            <label id="recordTogeAllocationToggleLabel" style="display:none">
+              <span class="toge-allocation-toggle"><input id="recordTogeAllocationEnabled" class="toge-allocation-checkbox" type="checkbox">峠の茶屋用に振り分ける</span>
+            </label>
+            <div id="recordTogeAllocationFields" style="display:none">
+              <div class="product-name">峠の茶屋用振り分け</div>
+              <label>振分ID
+                <select id="recordTogeAllocationId"></select>
+              </label>
+              <input id="recordTogeGeneratedId" type="hidden" value="">
+              <label>峠の茶屋用本数（本）
+                <input id="recordTogePieceCount" type="number" inputmode="numeric" min="0" step="1" value="0">
+              </label>
+              <div class="product-name" id="recordTogeWeightDisplay">使用重量：0.0g</div>
+              <div id="recordTogeStatus" class="status"></div>
+            </div>
             <div class="product-name" id="recordPackWeightDisplay">1袋重量: 未設定</div>
             <div class="product-name" id="recordPackCountDisplay">1袋本数: 未設定</div>
             <div class="product-name" id="recordCompletedCountDisplay" style="display:none">完成本数: 0本</div>
@@ -1020,15 +1138,6 @@
         category: "委託製造",
         label: recordRecipeDisplayName(gibier.recipe),
         recipe: gibier.recipe
-      });
-      const touge = outsourceClients.touge;
-      touge.recipes.forEach((recipe, index) => {
-        clientOptions.push({
-          id: `client:touge:${index}`,
-          category: "委託製造",
-          label: recordRecipeDisplayName(recipe),
-          recipe
-        });
       });
       return [...own, ...clientOptions].filter((option) => option.category === category);
     }
@@ -1084,10 +1193,15 @@
       return normalized;
     }
 
+    function createRecordId(prefix) {
+      if (globalThis.crypto && typeof globalThis.crypto.randomUUID === "function") return `${prefix}-${globalThis.crypto.randomUUID()}`;
+      return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+    }
+
     function saveRecipeCalculation(calculation) {
       if (!calculation) return;
       const records = loadSavedRecipeCalculations();
-      const savedRecipeId = `${Date.now()}`;
+      const savedRecipeId = createRecordId("saved-recipe");
       const enriched = enrichSavedRecipeCalculation({
         ...calculation,
         id: savedRecipeId,
@@ -1242,8 +1356,10 @@
         try {
           saveSavedRecipeCalculations(records);
           showSavedRecipeDetail(savedRecipeRecordId(record), false, "保存しました");
+          showSaveToast("保存しました。");
         } catch (error) {
           document.getElementById("savedRecipeStatus").textContent = "保存に失敗しました";
+          showSaveToast("保存できませんでした。もう一度お試しください。", "error");
         }
       });
       renderPreview();
@@ -1280,10 +1396,93 @@
       }
     }
 
+    function togeComponentTypeForOption(option) {
+      if (!option || option.category !== "自社レシピ") return "";
+      if (option.packagingKey === "arabiki") return "arabiki";
+      if (option.packagingKey === "herbProduct" || option.packagingKey === "herbEvent") return "herb";
+      return "";
+    }
+
+    function togeComponentTypeForRecord(record) {
+      if (record.togeComponentType) return record.togeComponentType;
+      if (record.category !== "自社レシピ") return "";
+      if (record.packagingKey === "arabiki" || record.savedRecipeName === "あらびき") return "arabiki";
+      if (record.packagingKey === "herbProduct" || record.packagingKey === "herbEvent" || record.savedRecipeName === "ハーブ") return "herb";
+      return "";
+    }
+
+    function generateTogeAllocationId(dateValue) {
+      const datePart = String(dateValue || todayString()).replace(/-/g, "");
+      const prefix = `TGE-${datePart}-`;
+      const numbers = loadManufacturingRecords().map((record) => String(record.togeAllocationId || ""))
+        .filter((id) => id.startsWith(prefix))
+        .map((id) => Number(id.slice(prefix.length)) || 0);
+      return `${prefix}${String(Math.max(0, ...numbers) + 1).padStart(3, "0")}`;
+    }
+
+    function availableTogeAllocations(componentType, currentRecordId = "") {
+      const grouped = new Map();
+      loadManufacturingRecords().forEach((record) => {
+        if (!record.togeAllocationEnabled || !record.togeAllocationId || manufacturingRecordId(record) === currentRecordId) return;
+        const component = togeComponentTypeForRecord(record);
+        if (!component) return;
+        if (!grouped.has(record.togeAllocationId)) grouped.set(record.togeAllocationId, {});
+        grouped.get(record.togeAllocationId)[component] = Number(record.togePieceCount || 0);
+      });
+      return [...grouped.entries()]
+        .filter(([, parts]) => !parts[componentType])
+        .map(([id, parts]) => ({ id, parts }))
+        .sort((a, b) => b.id.localeCompare(a.id));
+    }
+
+    function togeAllocationState(allocationId, candidate = null, currentRecordId = "") {
+      if (!allocationId) return { state: "", message: "" };
+      const parts = {};
+      loadManufacturingRecords().forEach((record) => {
+        if (!record.togeAllocationEnabled || record.togeAllocationId !== allocationId || manufacturingRecordId(record) === currentRecordId) return;
+        const component = togeComponentTypeForRecord(record);
+        if (component) parts[component] = Number(record.togePieceCount || 0);
+      });
+      if (candidate && candidate.togeAllocationEnabled && candidate.togeAllocationId === allocationId) {
+        parts[candidate.togeComponentType] = Number(candidate.togePieceCount || 0);
+      }
+      const hasArabiki = Number.isFinite(parts.arabiki);
+      const hasHerb = Number.isFinite(parts.herb);
+      if (hasArabiki && hasHerb) {
+        const complete = Math.min(parts.arabiki, parts.herb);
+        if (parts.arabiki === parts.herb) return { state: "完了", message: `峠の茶屋：${complete}パック分完了` };
+        const difference = Math.abs(parts.arabiki - parts.herb);
+        const excess = parts.arabiki > parts.herb ? `あらびき${difference}本` : `ハーブ${difference}本`;
+        return { state: "本数不一致", message: `峠の茶屋用の本数が一致していません。\nあらびき：${parts.arabiki}本\nハーブ：${parts.herb}本\n差：${difference}本\n完成可能：${complete}パック\n未対応：${excess}` };
+      }
+      if (hasArabiki) return { state: "未完了", message: `峠の茶屋振分ID：${allocationId}\nあらびき：${parts.arabiki}本\nハーブ：未入力\n状態：組み合わせ未完了` };
+      if (hasHerb) return { state: "未完了", message: `峠の茶屋振分ID：${allocationId}\nあらびき：未入力\nハーブ：${parts.herb}本\n状態：組み合わせ未完了` };
+      return { state: "", message: "" };
+    }
+
+    function validateTogeAllocation(record, currentRecordId = "") {
+      if (!record.togeAllocationEnabled) return "";
+      const rawCount = Number(record.togePieceCount);
+      if (!Number.isInteger(rawCount) || rawCount <= 0) return "峠の茶屋用本数を入力してください。";
+      if (!record.togeAllocationId) return "峠の茶屋振分IDを選択してください。";
+      const duplicate = loadManufacturingRecords().some((item) => (
+        manufacturingRecordId(item) !== currentRecordId && item.togeAllocationEnabled &&
+        item.togeAllocationId === record.togeAllocationId && togeComponentTypeForRecord(item) === record.togeComponentType
+      ));
+      if (duplicate) return `この峠の茶屋振分IDには、すでに${record.togeComponentType === "arabiki" ? "あらびき" : "ハーブ"}が登録されています。`;
+      const baseFinishedWeight = Number(record.finishedWeight || 0) - Number(record.togeAllocatedWeight || 0);
+      const theoreticalWeight = Number(record.theoreticalFinishedWeight || 0);
+      if (theoreticalWeight > 0 && baseFinishedWeight <= theoreticalWeight && Number(record.finishedWeight || 0) > theoreticalWeight) {
+        return "峠の茶屋への振り分け量が完成重量を超えています。";
+      }
+      return "";
+    }
+
     function bindManufacturingRecordForm(draft = {}) {
       const ids = [
-        "recordPrepDate", "recordDate", "recordCategory", "recordRecipe", "recordLot", "recordMemo",
-        "recordPackageCount", "recordSmokedCount", "recordUnsmokedCount", "recordLossCount", "recordLeftoverWeight"
+        "recordSavedRecipeId", "recordPrepDate", "recordDate", "recordCategory", "recordRecipe", "recordLot", "recordMemo",
+        "recordPackageCount", "recordSmokedCount", "recordUnsmokedCount", "recordLossCount", "recordLeftoverWeight",
+        "recordTogeAllocationEnabled", "recordTogeAllocationId", "recordTogeGeneratedId", "recordTogePieceCount"
       ];
       const elements = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
       const savedCalcStatus = document.getElementById("recordSavedCalcStatus");
@@ -1298,6 +1497,10 @@
       const yieldDisplay = document.getElementById("recordYieldDisplay");
       const goodNotesText = document.getElementById("recordGoodNotesText");
       const status = document.getElementById("recordStatus");
+      const togeToggleLabel = document.getElementById("recordTogeAllocationToggleLabel");
+      const togeFields = document.getElementById("recordTogeAllocationFields");
+      const togeWeightDisplay = document.getElementById("recordTogeWeightDisplay");
+      const togeStatus = document.getElementById("recordTogeStatus");
 
       const refreshRecipeOptions = () => {
         const options = recordRecipeOptions(elements.recordCategory.value);
@@ -1309,11 +1512,32 @@
         if (draft.recordCategory) elements.recordCategory.value = draft.recordCategory;
         refreshRecipeOptions();
         ids.forEach((id) => {
-          if (draft[id] != null && elements[id]) elements[id].value = draft[id];
+          if (draft[id] != null && elements[id]) {
+            if (elements[id].type === "checkbox") elements[id].checked = Boolean(draft[id]);
+            else elements[id].value = draft[id];
+          }
         });
       };
 
+      const configureTogeControls = () => {
+        const option = getRecordRecipeOption(elements.recordRecipe.value, elements.recordCategory.value);
+        const componentType = togeComponentTypeForOption(option);
+        togeToggleLabel.style.display = componentType ? "grid" : "none";
+        if (!componentType) elements.recordTogeAllocationEnabled.checked = false;
+        const enabled = componentType && elements.recordTogeAllocationEnabled.checked;
+        togeFields.style.display = enabled ? "grid" : "none";
+        if (!enabled) return;
+        const previous = elements.recordTogeAllocationId.value || "__new__";
+        const available = availableTogeAllocations(componentType);
+        elements.recordTogeAllocationId.innerHTML = `<option value="__new__">新しい振分を作成</option>${available.map(({ id, parts }) => `<option value="${escapeHtml(id)}">${escapeHtml(id)}（${parts.arabiki != null ? `あらびき：${parts.arabiki}本` : "あらびき：未入力"} / ${parts.herb != null ? `ハーブ：${parts.herb}本` : "ハーブ：未入力"}）</option>`).join("")}`;
+        elements.recordTogeAllocationId.value = [...elements.recordTogeAllocationId.options].some((item) => item.value === previous) ? previous : "__new__";
+        if (elements.recordTogeAllocationId.value === "__new__" && !elements.recordTogeGeneratedId.value) {
+          elements.recordTogeGeneratedId.value = generateTogeAllocationId(elements.recordDate.value);
+        }
+      };
+
       const render = () => {
+        configureTogeControls();
         const record = collectManufacturingRecord(elements);
         const isGibier = record.recipeKind === "gibier";
         elements.recordLot.value = record.lot;
@@ -1340,6 +1564,9 @@
         completedCountDisplay.textContent = `完成本数: ${record.completedCount || 0}本`;
         finishedWeightDisplay.textContent = `完成重量: ${record.finishedWeight == null ? "計算不可" : `${formatRecordNumber(record.finishedWeight)}g`}`;
         yieldDisplay.textContent = `歩留まり率: ${yieldDisplayText(record)}`;
+        togeWeightDisplay.textContent = `使用重量：${formatRecordNumber(record.togeAllocatedWeight)}g`;
+        togeStatus.textContent = record.togeAllocationEnabled ? togeAllocationState(record.togeAllocationId, record).message : "";
+        togeStatus.style.whiteSpace = "pre-line";
         goodNotesText.value = buildManufacturingRecordText(record);
         saveScreenState("recordForm", ["home", "records", "new"], recordFormDraftValues());
       };
@@ -1347,30 +1574,51 @@
       refreshRecipeOptions();
       applyDraft();
       elements.recordCategory.addEventListener("change", () => {
+        elements.recordSavedRecipeId.value = "";
         refreshRecipeOptions();
         render();
       });
       ids.forEach((id) => {
         if (id !== "recordCategory") elements[id].addEventListener("input", render);
-        if (id === "recordRecipe") elements[id].addEventListener("change", render);
+        if (id === "recordRecipe") elements[id].addEventListener("change", () => {
+          elements.recordSavedRecipeId.value = "";
+          render();
+        });
       });
       document.getElementById("recordGoodNotes").addEventListener("click", render);
-      document.getElementById("recordSave").addEventListener("click", () => {
-        const record = collectManufacturingRecord(elements);
-        record.id = `${Date.now()}`;
-        record.manufacturingRecordId = record.id;
-        record.createdAt = new Date().toISOString();
-        record.updatedAt = new Date().toISOString();
-        record.savedAt = record.createdAt;
-        const records = loadManufacturingRecords();
-        records.unshift(record);
+      const recordSaveButton = document.getElementById("recordSave");
+      let isSavingRecord = false;
+      recordSaveButton.addEventListener("click", () => {
+        if (isSavingRecord) return;
+        if (!elements.recordPrepDate.value || !elements.recordDate.value || !elements.recordRecipe.value) {
+          showSaveToast("必須項目を入力してください。", "error");
+          return;
+        }
+        isSavingRecord = true;
+        recordSaveButton.disabled = true;
         try {
+          const record = collectManufacturingRecord(elements);
+          const allocationError = validateTogeAllocation(record);
+          if (allocationError) {
+            showSaveToast(allocationError, "error");
+            return;
+          }
+          record.id = createRecordId("manufacturing-record");
+          record.manufacturingRecordId = record.id;
+          record.createdAt = new Date().toISOString();
+          record.updatedAt = new Date().toISOString();
+          record.savedAt = record.createdAt;
+          const records = loadManufacturingRecords();
+          records.unshift(record);
           saveManufacturingRecords(records);
           clearScreenState();
           goodNotesText.value = buildManufacturingRecordText(record);
-          status.textContent = "保存しました";
+          showSaveToast("保存しました。");
         } catch (error) {
-          status.textContent = "保存に失敗しました";
+          showSaveToast("保存できませんでした。もう一度お試しください。", "error");
+        } finally {
+          isSavingRecord = false;
+          recordSaveButton.disabled = false;
         }
       });
       render();
@@ -1378,7 +1626,10 @@
 
     function collectManufacturingRecord(elements) {
       const option = getRecordRecipeOption(elements.recordRecipe.value, elements.recordCategory.value);
-      const savedCalculation = findSavedRecipeCalculation(elements.recordPrepDate.value, option.category, option.savedRecipeName || option.label);
+      const selectedSavedRecipeId = elements.recordSavedRecipeId ? elements.recordSavedRecipeId.value : "";
+      const savedCalculation = selectedSavedRecipeId
+        ? loadSavedRecipeCalculations().find((record) => savedRecipeRecordId(record) === selectedSavedRecipeId)
+        : findSavedRecipeCalculation(elements.recordPrepDate.value, option.category, option.savedRecipeName || option.label);
       const packagingSpec = packagingSpecForRecordOption(option);
       const isGibier = option.recipe.kind === "gibier";
       const packagingUnit = isGibier ? "本" : (packagingSpec ? packagingSpec.unit : "");
@@ -1392,7 +1643,14 @@
       const completedNumber = isGibier ? gibierMetrics.completedCount : inputCount;
       const packageCount = packagingUnit === "本" ? "" : elements.recordPackageCount.value;
       const completedCount = packagingUnit === "本" ? String(completedNumber) : "";
-      const finishedWeight = isGibier ? gibierMetrics.actualCompletedWeight : (unitWeight == null ? null : completedNumber * unitWeight);
+      const togeComponentType = togeComponentTypeForOption(option);
+      const togeAllocationEnabled = Boolean(togeComponentType && elements.recordTogeAllocationEnabled && elements.recordTogeAllocationEnabled.checked);
+      const togePieceCount = togeAllocationEnabled ? Number(elements.recordTogePieceCount.value || 0) : 0;
+      const togeAllocatedWeight = togeAllocationEnabled && Number.isFinite(togePieceCount) ? togePieceCount * 35 : 0;
+      const selectedTogeId = elements.recordTogeAllocationId ? elements.recordTogeAllocationId.value : "";
+      const togeAllocationId = togeAllocationEnabled ? (selectedTogeId === "__new__" ? elements.recordTogeGeneratedId.value : selectedTogeId) : "";
+      const baseFinishedWeight = isGibier ? gibierMetrics.actualCompletedWeight : (unitWeight == null ? null : completedNumber * unitWeight);
+      const finishedWeight = baseFinishedWeight == null ? null : baseFinishedWeight + togeAllocatedWeight;
       const yieldRate = isGibier ? gibierMetrics.yieldRate : (finishedWeight == null || theoreticalFinishedWeight <= 0 ? null : finishedWeight / theoreticalFinishedWeight * 100);
       return {
         prepDate: elements.recordPrepDate.value,
@@ -1408,7 +1666,7 @@
         unitWeightLabel: packagingUnit === "本" ? "1本重量" : "1袋重量",
         unitPiecesLabel: packagingUnit === "袋" ? "1袋本数" : "",
         recipeKind: option.recipe.kind,
-        lot: generateManufacturingLot(elements.recordDate.value, option.category, option.recipe, option.packagingKey),
+        lot: savedCalculation && savedCalculation.lot ? savedCalculation.lot : generateManufacturingLot(elements.recordDate.value, option.category, option.recipe, option.packagingKey),
         memo: elements.recordMemo.value.trim(),
         savedRecipeId: savedCalculation ? savedRecipeRecordId(savedCalculation) : "",
         savedCalculationId: savedCalculation ? savedRecipeRecordId(savedCalculation) : "",
@@ -1433,6 +1691,12 @@
         packPieces: unitPieces,
         unitWeight,
         unitPieces,
+        togeAllocationEnabled,
+        togeAllocationId,
+        togeAllocationUuid: togeAllocationEnabled ? togeAllocationId : "",
+        togePieceCount,
+        togeAllocatedWeight,
+        togeComponentType: togeAllocationEnabled ? togeComponentType : "",
         finishedWeight,
         yieldRate
       };
@@ -1600,6 +1864,7 @@
       const isGibier = isGibierManufacturingRecord(record);
       const countLabel = record.packagingUnit === "本" ? "完成本数" : "包装数";
       const countValue = record.packagingUnit === "本" ? record.completedCount : record.packageCount;
+      const togeState = record.togeAllocationEnabled ? togeAllocationState(record.togeAllocationId, record, manufacturingRecordId(record)).message : "";
       return `
         <div class="record-summary">
           <div>仕込み日：${escapeHtml(record.prepDate || "")}</div>
@@ -1620,6 +1885,12 @@
           <div>余り重量：${formatRecordNumber(record.leftoverWeight || 0)}g</div>
           <div>完成重量：${record.finishedWeight == null ? "計算不可" : `${formatRecordNumber(record.finishedWeight)}g`}</div>
           <div>歩留まり率：${yieldDisplayText(record)}</div>
+          ${record.togeAllocationEnabled ? `
+            <div>峠の茶屋振分ID：${escapeHtml(record.togeAllocationId || "")}</div>
+            <div>峠の茶屋用本数：${escapeHtml(record.togePieceCount || "0")}本</div>
+            <div>峠の茶屋用使用重量：${formatRecordNumber(record.togeAllocatedWeight || 0)}g</div>
+            <div style="white-space:pre-line">${escapeHtml(togeState)}</div>
+          ` : ""}
           <div>メモ：${escapeHtml(record.memo || "")}</div>
         </div>
       `;
@@ -1627,6 +1898,9 @@
 
     function manufacturingRecordEditHtml(record) {
       const isGibier = isGibierManufacturingRecord(record);
+      const togeComponentType = togeComponentTypeForRecord(record);
+      const allocationOptions = togeComponentType ? availableTogeAllocations(togeComponentType, manufacturingRecordId(record)) : [];
+      const currentAllocationId = record.togeAllocationId || "";
       return `
         <div class="record-summary">
           <div>製造区分：${escapeHtml(record.category || "")}</div>
@@ -1655,6 +1929,23 @@
           <label>余り重量(g)
             <input id="editRecordLeftoverWeight" type="number" inputmode="decimal" min="0" step="0.1" value="${escapeHtml(record.leftoverWeight || "0")}">
           </label>
+          ${togeComponentType ? `
+          <label><span class="toge-allocation-toggle"><input id="editRecordTogeAllocationEnabled" class="toge-allocation-checkbox" type="checkbox" ${record.togeAllocationEnabled ? "checked" : ""}>峠の茶屋用に振り分ける</span></label>
+          <div id="editRecordTogeAllocationFields" style="display:${record.togeAllocationEnabled ? "grid" : "none"}">
+            <div class="product-name">峠の茶屋用振り分け</div>
+            <label>振分ID
+              <select id="editRecordTogeAllocationId">
+                <option value="__new__">新しい振分を作成</option>
+                ${currentAllocationId ? `<option value="${escapeHtml(currentAllocationId)}" selected>${escapeHtml(currentAllocationId)}</option>` : ""}
+                ${allocationOptions.filter(({ id }) => id !== currentAllocationId).map(({ id }) => `<option value="${escapeHtml(id)}">${escapeHtml(id)}</option>`).join("")}
+              </select>
+            </label>
+            <input id="editRecordTogeGeneratedId" type="hidden" value="${currentAllocationId ? "" : escapeHtml(generateTogeAllocationId(record.date))}">
+            <label>峠の茶屋用本数（本）
+              <input id="editRecordTogePieceCount" type="number" inputmode="numeric" min="0" step="1" value="${escapeHtml(record.togePieceCount || "0")}">
+            </label>
+          </div>
+          ` : ""}
           <label>メモ
             <textarea id="editRecordMemo">${escapeHtml(record.memo || "")}</textarea>
           </label>
@@ -1672,30 +1963,62 @@
       const lossCount = document.getElementById("editRecordLossCount");
       const leftoverWeight = document.getElementById("editRecordLeftoverWeight");
       const memo = document.getElementById("editRecordMemo");
+      const togeEnabled = document.getElementById("editRecordTogeAllocationEnabled");
+      const togeFields = document.getElementById("editRecordTogeAllocationFields");
+      const togeId = document.getElementById("editRecordTogeAllocationId");
+      const togeGeneratedId = document.getElementById("editRecordTogeGeneratedId");
+      const togePieceCount = document.getElementById("editRecordTogePieceCount");
       const preview = document.getElementById("recordEditPreview");
+      const allocationValues = () => ({
+        enabled: Boolean(togeEnabled && togeEnabled.checked),
+        id: togeId ? (togeId.value === "__new__" ? togeGeneratedId.value : togeId.value) : "",
+        pieceCount: togePieceCount ? togePieceCount.value : "0"
+      });
       const renderPreview = () => {
-        const updated = recalculateManufacturingRecord(record, prepDate.value, date.value, packageCount ? packageCount.value : "", lossCount.value, leftoverWeight.value, memo.value, smokedCount ? smokedCount.value : "0", unsmokedCount ? unsmokedCount.value : "0");
+        if (togeFields) togeFields.style.display = togeEnabled.checked ? "grid" : "none";
+        const allocation = allocationValues();
+        const updated = recalculateManufacturingRecord(record, prepDate.value, date.value, packageCount ? packageCount.value : "", lossCount.value, leftoverWeight.value, memo.value, smokedCount ? smokedCount.value : "0", unsmokedCount ? unsmokedCount.value : "0", allocation.enabled, allocation.id, allocation.pieceCount);
         preview.innerHTML = manufacturingRecordReadHtml(updated);
         document.getElementById("recordDetailText").value = buildManufacturingRecordText(updated);
       };
-      [prepDate, date, packageCount, smokedCount, unsmokedCount, lossCount, leftoverWeight, memo].filter(Boolean).forEach((element) => element.addEventListener("input", renderPreview));
+      [prepDate, date, packageCount, smokedCount, unsmokedCount, lossCount, leftoverWeight, memo, togeEnabled, togeId, togePieceCount].filter(Boolean).forEach((element) => element.addEventListener("input", renderPreview));
+      [togeEnabled, togeId].filter(Boolean).forEach((element) => element.addEventListener("change", renderPreview));
       document.getElementById("recordEditCancel").addEventListener("click", () => showManufacturingRecordDetail(manufacturingRecordId(record)));
-      document.getElementById("recordEditSave").addEventListener("click", () => {
-        const updated = recalculateManufacturingRecord(record, prepDate.value, date.value, packageCount ? packageCount.value : "", lossCount.value, leftoverWeight.value, memo.value, smokedCount ? smokedCount.value : "0", unsmokedCount ? unsmokedCount.value : "0");
-        const records = loadManufacturingRecords();
-        const index = records.findIndex((item) => manufacturingRecordId(item) === manufacturingRecordId(record));
-        if (index >= 0) records[index] = updated;
+      const editSaveButton = document.getElementById("recordEditSave");
+      let isSavingRecordEdit = false;
+      editSaveButton.addEventListener("click", () => {
+        if (isSavingRecordEdit) return;
+        if (!prepDate.value || !date.value) {
+          showSaveToast("必須項目を入力してください。", "error");
+          return;
+        }
+        isSavingRecordEdit = true;
+        editSaveButton.disabled = true;
         try {
+          const allocation = allocationValues();
+          const updated = recalculateManufacturingRecord(record, prepDate.value, date.value, packageCount ? packageCount.value : "", lossCount.value, leftoverWeight.value, memo.value, smokedCount ? smokedCount.value : "0", unsmokedCount ? unsmokedCount.value : "0", allocation.enabled, allocation.id, allocation.pieceCount);
+          const allocationError = validateTogeAllocation(updated, manufacturingRecordId(record));
+          if (allocationError) {
+            showSaveToast(allocationError, "error");
+            return;
+          }
+          const records = loadManufacturingRecords();
+          const index = records.findIndex((item) => manufacturingRecordId(item) === manufacturingRecordId(record));
+          if (index >= 0) records[index] = updated;
           saveManufacturingRecords(records);
           showManufacturingRecordDetail(manufacturingRecordId(record), false, "更新しました");
+          showSaveToast("保存しました。");
         } catch (error) {
-          document.getElementById("recordDetailStatus").textContent = "保存に失敗しました";
+          showSaveToast("保存できませんでした。もう一度お試しください。", "error");
+        } finally {
+          isSavingRecordEdit = false;
+          editSaveButton.disabled = false;
         }
       });
       renderPreview();
     }
 
-    function recalculateManufacturingRecord(record, prepDate, date, countValue, lossCount, leftoverWeight, memo, smokedValue = "0", unsmokedValue = "0") {
+    function recalculateManufacturingRecord(record, prepDate, date, countValue, lossCount, leftoverWeight, memo, smokedValue = "0", unsmokedValue = "0", togeEnabledValue = Boolean(record.togeAllocationEnabled), togeIdValue = record.togeAllocationId || "", togePieceValue = record.togePieceCount || 0) {
       const isGibier = isGibierManufacturingRecord(record);
       const theoreticalFinishedWeight = Number(record.theoreticalFinishedWeight || 0);
       const gibierMetrics = calculateGibierProductionMetrics(smokedValue, unsmokedValue, theoreticalFinishedWeight);
@@ -1703,7 +2026,12 @@
       const unsmokedCount = isGibier ? gibierMetrics.unsmokedCount : Number(record.unsmokedCount || 0);
       const count = isGibier ? gibierMetrics.completedCount : Number(countValue || 0);
       const unitWeight = isGibier ? 70 : (record.unitWeight == null && record.packWeight == null ? null : Number(record.unitWeight != null ? record.unitWeight : record.packWeight));
-      const finishedWeight = isGibier ? gibierMetrics.actualCompletedWeight : (unitWeight == null ? null : count * unitWeight);
+      const togeComponentType = togeComponentTypeForRecord(record);
+      const togeAllocationEnabled = Boolean(togeComponentType && togeEnabledValue);
+      const togePieceCount = togeAllocationEnabled ? Number(togePieceValue || 0) : 0;
+      const togeAllocatedWeight = togeAllocationEnabled && Number.isFinite(togePieceCount) ? togePieceCount * 35 : 0;
+      const baseFinishedWeight = isGibier ? gibierMetrics.actualCompletedWeight : (unitWeight == null ? null : count * unitWeight);
+      const finishedWeight = baseFinishedWeight == null ? null : baseFinishedWeight + togeAllocatedWeight;
       const yieldRate = isGibier ? gibierMetrics.yieldRate : (finishedWeight == null || theoreticalFinishedWeight <= 0 ? null : finishedWeight / theoreticalFinishedWeight * 100);
       return {
         ...record,
@@ -1717,6 +2045,12 @@
         lossCount,
         leftoverWeight,
         memo,
+        togeAllocationEnabled,
+        togeAllocationId: togeAllocationEnabled ? togeIdValue : "",
+        togeAllocationUuid: togeAllocationEnabled ? togeIdValue : "",
+        togePieceCount,
+        togeAllocatedWeight,
+        togeComponentType: togeAllocationEnabled ? togeComponentType : "",
         finishedWeight,
         yieldRate,
         updatedAt: new Date().toISOString()
@@ -1995,8 +2329,8 @@
       const copyButton = document.getElementById(`${prefix}-copy`);
       const saveCalcButton = document.getElementById(`${prefix}-saveCalc`);
       const status = document.getElementById(`${prefix}-status`);
-      const usesSaveToast = recipe.kind === "own" || recipe.kind === "touge";
       let latestCalculation = null;
+      let isSavingCalculation = false;
 
       const render = () => {
         const meat6mm = meat6mmInput ? Math.max(Number(meat6mmInput.value || 0), 0) : 0;
@@ -2053,19 +2387,17 @@
       if (splitSelect) splitSelect.addEventListener("change", render);
       copyButton.addEventListener("click", () => copyToClipboard(copyText.value, status));
       saveCalcButton.addEventListener("click", () => {
+        if (isSavingCalculation) return;
+        isSavingCalculation = true;
+        saveCalcButton.disabled = true;
         try {
           saveRecipeCalculation(latestCalculation);
-          if (usesSaveToast) {
-            showSaveToast("保存しました。");
-          } else {
-            showTemporaryStatus(status, "計算結果を保存しました");
-          }
+          showSaveToast("保存しました。");
         } catch (error) {
-          if (usesSaveToast) {
-            showSaveToast("保存できませんでした。もう一度お試しください。", "error");
-          } else {
-            showTemporaryStatus(status, "保存できませんでした", "error");
-          }
+          showSaveToast("保存できませんでした。もう一度お試しください。", "error");
+        } finally {
+          isSavingCalculation = false;
+          saveCalcButton.disabled = false;
         }
       });
       render();
@@ -2111,6 +2443,7 @@
       const saveCalcButton = document.getElementById(`${prefix}-saveCalc`);
       const status = document.getElementById(`${prefix}-status`);
       let latestCalculation = null;
+      let isSavingGibierCalculation = false;
 
       const render = () => {
         const deer = Math.max(Number(deerInput.value || 0), 0);
@@ -2141,11 +2474,17 @@
       porkInput.addEventListener("input", render);
       copyButton.addEventListener("click", () => copyToClipboard(copyText.value, status));
       saveCalcButton.addEventListener("click", () => {
+        if (isSavingGibierCalculation) return;
+        isSavingGibierCalculation = true;
+        saveCalcButton.disabled = true;
         try {
           saveRecipeCalculation(latestCalculation);
-          showTemporaryStatus(status, "計算結果を保存しました");
+          showSaveToast("保存しました。");
         } catch (error) {
-          showTemporaryStatus(status, "保存できませんでした", "error");
+          showSaveToast("保存できませんでした。もう一度お試しください。", "error");
+        } finally {
+          isSavingGibierCalculation = false;
+          saveCalcButton.disabled = false;
         }
       });
       render();
