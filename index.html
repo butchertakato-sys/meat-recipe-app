@@ -470,6 +470,31 @@
       font-size: 16px;
     }
 
+    .packaging-standard {
+      display: grid;
+      gap: 4px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .packaging-active-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 48px;
+      width: fit-content;
+    }
+
+    .packaging-active-checkbox {
+      width: 28px;
+      min-height: 28px;
+      height: 28px;
+      margin: 0;
+    }
+
     .record-actions {
       display: grid;
       gap: 10px;
@@ -527,21 +552,60 @@
     */
 
     const appState = {
-      activeClientTab: "calc"
+      activeClientTab: "calc",
+      additiveFreeTab: "calc"
     };
     const MANUFACTURING_RECORDS_KEY = "manufacturingRecords";
     const SAVED_RECIPE_CALCULATIONS_KEY = "savedRecipes";
     const OLD_MANUFACTURING_RECORDS_KEY = "meatRecipeApp.manufacturingRecords.v1";
     const OLD_SAVED_RECIPE_CALCULATIONS_KEY = "meatRecipeApp.savedRecipeCalculations.v1";
+    const PACKAGING_MASTER_KEY = "packagingMaster.v1";
     const MANUFACTURING_RECORD_CSV_HEADERS = ["仕込み日", "製造日", "製造区分", "レシピ名", "ロット番号", "6mm肉重量", "3mm肉重量", "肉重量合計", "水", "乳化生地重量", "合計重量", "包装単位", "包装数", "完成本数", "燻製本数", "燻製なし本数", "ロス本数", "余り重量", "完成重量", "歩留まり率", "メモ"];
     const SCREEN_STATE_KEY = "meatRecipeApp.screenState.v1";
     let currentScreenState = null;
+
+    const ADDITIVE_FREE_RECIPE_ID = "RECIPE_ADDITIVE_FREE_ARABIKI";
+    const ADDITIVE_FREE_PRODUCT_ID = "PROD_ADDITIVE_FREE_ARABIKI";
+    const ADDITIVE_FREE_SPICE_BLEND = {
+      spiceBlendId: "SPICE_ADDITIVE_FREE_ARABIKI",
+      recipeId: ADDITIVE_FREE_RECIPE_ID,
+      name: "無添加あらびき用スパイス",
+      baseTotalG: 96,
+      ingredients: [
+        { name: "ホワイトペッパー", weightG: 27 },
+        { name: "パプリカパウダー", weightG: 17 },
+        { name: "コリアンダー", weightG: 11 },
+        { name: "ナツメグ", weightG: 9 },
+        { name: "マスタードパウダー", weightG: 7 },
+        { name: "三温糖", weightG: 25 }
+      ]
+    };
 
     const ownRecipes = {
       arabiki: { name: "あらびき", description: "自社レシピ", kind: "own" },
       cheese: { name: "チーズ", description: "自社レシピ", kind: "own" },
       herb: { name: "ハーブ", description: "自社レシピ", kind: "own" },
-      chorizo: { name: "チョリソー", description: "自社レシピ", kind: "own" }
+      chorizo: { name: "チョリソー", description: "自社レシピ", kind: "own" },
+      additiveFreeArabiki: {
+        recipeId: ADDITIVE_FREE_RECIPE_ID,
+        productId: ADDITIVE_FREE_PRODUCT_ID,
+        name: "無添加あらびき",
+        description: "自社レシピ・固定配合",
+        kind: "fixed-own",
+        recipeType: "fixed",
+        ingredients: { meat6mmG: 1800, leanMeat3mmG: 1800, iceG: 720, saltG: 73.4, spiceG: 30.2 },
+        spiceBlendId: ADDITIVE_FREE_SPICE_BLEND.spiceBlendId,
+        manufacturingSpec: {
+          length: "12cm",
+          casing: "羊腸20-22",
+          bagStandard: "15-25",
+          piecesPerBag: 3,
+          instructions: [
+            "3mm肉と塩、スパイス、氷をカッターに投入し、乳化生地を作る。",
+            "乳化生地に6mm肉を混ぜ込み、生地とする。"
+          ]
+        }
+      }
     };
 
     const ownPackagingSpecs = {
@@ -846,7 +910,7 @@
     }
 
     app.addEventListener("click", (event) => {
-      const button = event.target.closest(".menu-button");
+      const button = event.target.closest(".menu-button, [data-type='packaging-master-edit']");
       if (!button) return;
       const { type, id } = button.dataset;
       if (type === "category") showCategory(id);
@@ -861,6 +925,8 @@
       if (type === "record-history") showManufacturingRecordHistory();
       if (type === "record-csv") showManufacturingRecordCsv();
       if (type === "record-detail") showManufacturingRecordDetail(id);
+      if (type === "packaging-master") showPackagingMasterList();
+      if (type === "packaging-master-edit") showPackagingMasterForm(id);
     });
 
     function showHome() {
@@ -935,7 +1001,8 @@
         { label: "新規製造記録", description: "製造内容を入力して保存", type: "record-new", id: "new" },
         { label: "保存済みレシピ確認", description: "保存した計算結果を確認・編集", type: "saved-recipe-list", id: "saved-recipes" },
         { label: "製造記録履歴", description: "保存した記録を確認", type: "record-history", id: "history" },
-        { label: "CSV出力", description: "保存済み記録を書き出し", type: "record-csv", id: "csv" }
+        { label: "CSV出力", description: "保存済み記録を書き出し", type: "record-csv", id: "csv" },
+        { label: "包装マスタ", description: "包装基準の登録・編集", type: "packaging-master", id: "packaging" }
       ];
       app.innerHTML = `
         <section class="section">
@@ -949,6 +1016,269 @@
           </div>
         </section>
       `;
+    }
+
+    const PRODUCT_MASTER = [
+      { productId: "PROD_ARABIKI", productName: "あらびき" },
+      { productId: ADDITIVE_FREE_PRODUCT_ID, productName: "無添加あらびき" },
+      { productId: "PROD_HERB", productName: "ハーブ" },
+      { productId: "PROD_CHEESE", productName: "チーズ" },
+      { productId: "PROD_CHORIZO", productName: "チョリソー" },
+      { productId: "PROD_GIBIER_CENTER", productName: "ジビエセンター" },
+      { productId: "PROD_TOGE_CHAya", productName: "峠の茶屋" },
+      { productId: "PROD_YAMAGOYA", productName: "山小屋" },
+      { productId: "PROD_ZANZATEI", productName: "ざんざ亭" }
+    ];
+
+    function initialPackagingMasterRecords() {
+      const now = new Date().toISOString();
+      return [
+        { packagingId: "PACK_ARABIKI_STANDARD", productId: "PROD_ARABIKI", packagingName: "通常", quantityPerPackage: 3, netWeightG: 130, unitWeightG: 43.3, packageUnit: "パック", displayOrder: 1, isActive: true },
+        { packagingId: "PACK_HERB_STANDARD", productId: "PROD_HERB", packagingName: "通常", quantityPerPackage: 3, netWeightG: 130, unitWeightG: 43.3, packageUnit: "パック", displayOrder: 1, isActive: true },
+        { packagingId: "PACK_HERB_EVENT", productId: "PROD_HERB", packagingName: "イベント", quantityPerPackage: 1, netWeightG: 80, unitWeightG: 80, packageUnit: "本", displayOrder: 2, isActive: true },
+        { packagingId: "PACK_CHEESE_STANDARD", productId: "PROD_CHEESE", packagingName: "通常", quantityPerPackage: 3, netWeightG: 130, unitWeightG: 43.3, packageUnit: "パック", displayOrder: 1, isActive: true },
+        { packagingId: "PACK_CHORIZO_STANDARD", productId: "PROD_CHORIZO", packagingName: "通常", quantityPerPackage: 3, netWeightG: 130, unitWeightG: 43.3, packageUnit: "パック", displayOrder: 1, isActive: true },
+        { packagingId: "PACK_GIBIER_CENTER_STANDARD", productId: "PROD_GIBIER_CENTER", packagingName: "通常", quantityPerPackage: 1, netWeightG: 70, unitWeightG: 70, packageUnit: "本", displayOrder: 1, isActive: true },
+        { packagingId: "PACK_TOGE_CHAya_STANDARD", productId: "PROD_TOGE_CHAya", packagingName: "通常", quantityPerPackage: 2, netWeightG: 70, unitWeightG: 35, packageUnit: "パック", displayOrder: 1, isActive: true }
+      ].map((record) => ({ ...record, createdAt: now, updatedAt: now }));
+    }
+
+    function productIdForName(productName) {
+      const product = PRODUCT_MASTER.find((item) => item.productName === productName);
+      return product ? product.productId : "";
+    }
+
+    function productNameForId(productId) {
+      const product = PRODUCT_MASTER.find((item) => item.productId === productId);
+      return product ? product.productName : "";
+    }
+
+    function initialPackagingId(productId, packagingName) {
+      const initial = initialPackagingMasterRecords().find((item) => item.productId === productId && item.packagingName === packagingName);
+      return initial ? initial.packagingId : "";
+    }
+
+    function normalizePackagingRecord(record, index) {
+      const productId = record.productId || productIdForName(record.productName);
+      const packagingName = record.packagingName || "";
+      const initialRecord = initialPackagingMasterRecords().find((item) => item.productId === productId && item.packagingName === packagingName);
+      return {
+        packagingId: record.packagingId || initialPackagingId(productId, packagingName) || record.id || `PACK_CUSTOM_${Date.now()}_${index}`,
+        productId,
+        packagingName,
+        quantityPerPackage: Number(record.quantityPerPackage != null ? record.quantityPerPackage : record.pieceCount),
+        netWeightG: Number(record.netWeightG != null ? record.netWeightG : record.contentWeight),
+        unitWeightG: Number(record.unitWeightG != null ? record.unitWeightG : record.unitWeight),
+        packageUnit: record.packageUnit || record.packagingUnit || "パック",
+        displayOrder: Number.isInteger(Number(record.displayOrder)) ? Number(record.displayOrder) : (initialRecord ? initialRecord.displayOrder : index + 1),
+        isActive: record.isActive !== false,
+        createdAt: record.createdAt || new Date().toISOString(),
+        updatedAt: record.updatedAt || new Date().toISOString()
+      };
+    }
+
+    function loadPackagingMaster() {
+      try {
+        const rawValue = localStorage.getItem(PACKAGING_MASTER_KEY);
+        if (rawValue == null) {
+          const initialRecords = initialPackagingMasterRecords();
+          localStorage.setItem(PACKAGING_MASTER_KEY, JSON.stringify(initialRecords));
+          return initialRecords;
+        }
+        const parsed = JSON.parse(rawValue);
+        if (!Array.isArray(parsed)) return [];
+        const normalized = parsed.map(normalizePackagingRecord);
+        if (JSON.stringify(normalized) !== JSON.stringify(parsed)) localStorage.setItem(PACKAGING_MASTER_KEY, JSON.stringify(normalized));
+        return normalized;
+      } catch (error) {
+        return [];
+      }
+    }
+
+    function savePackagingMaster(records) {
+      localStorage.setItem(PACKAGING_MASTER_KEY, JSON.stringify(records));
+    }
+
+    function formatPackagingNumber(value) {
+      const number = Number(value || 0);
+      return Number.isInteger(number) ? String(number) : String(Number(number.toFixed(1)));
+    }
+
+    function packagingProductIdForOption(option) {
+      if (!option) return "";
+      if (option.category === "自社レシピ") return productIdForName(option.savedRecipeName || option.label);
+      if (option.recipe.kind === "gibier") return "PROD_GIBIER_CENTER";
+      if (option.recipe.kind === "yamanoya") return "PROD_YAMAGOYA";
+      return productIdForName(option.recipe.clientName || option.label.split(" /")[0]);
+    }
+
+    function packagingProductIdForRecord(record) {
+      if (record.category === "自社レシピ") return productIdForName(record.savedRecipeName || String(record.recipeName || "").replace(/（.*$/, ""));
+      if (isGibierManufacturingRecord(record)) return "PROD_GIBIER_CENTER";
+      if (String(record.recipeName || "").includes("山小屋")) return "PROD_YAMAGOYA";
+      if (String(record.recipeName || "").includes("ざんざ亭")) return "PROD_ZANZATEI";
+      if (String(record.recipeName || "").includes("峠の茶屋")) return "PROD_TOGE_CHAya";
+      return productIdForName(String(record.recipeName || "").split(" /")[0]);
+    }
+
+    function activePackagingForProduct(productId) {
+      return loadPackagingMaster().map((record, index) => ({ record, index }))
+        .filter(({ record }) => record.productId === productId && record.isActive)
+        .sort((a, b) => a.record.displayOrder - b.record.displayOrder || a.index - b.index)
+        .map(({ record }) => record);
+    }
+
+    function packagingStandardHtml(productId) {
+      const records = activePackagingForProduct(productId);
+      if (records.length === 0) return `<div class="empty">包装基準が登録されていません。</div>`;
+      return records.map((packaging) => {
+        const unitWeight = Number(packaging.unitWeightG || 0);
+        const unitText = `${Number.isInteger(unitWeight) ? "" : "約"}${formatPackagingNumber(unitWeight)}g／本`;
+        return `
+          <div class="packaging-standard">
+            <strong>包装基準：${escapeHtml(packaging.packagingName)}</strong>
+            <div>${formatPackagingNumber(packaging.quantityPerPackage)}本／${formatPackagingNumber(packaging.netWeightG)}g</div>
+            <div>${unitText}</div>
+            <div>包装単位：${escapeHtml(packaging.packageUnit)}</div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function showPackagingMasterList(message = "") {
+      setHeader("包装マスタ", "包装基準の登録・編集", true, showManufacturingRecordTop);
+      const records = loadPackagingMaster().map((record, index) => ({ record, index }))
+        .sort((a, b) => a.record.productId.localeCompare(b.record.productId) || a.record.displayOrder - b.record.displayOrder || a.index - b.index)
+        .map(({ record }) => record);
+      app.innerHTML = `
+        <section class="section">
+          <h2>包装マスタ</h2>
+          ${message ? `<div class="status">${escapeHtml(message)}</div>` : ""}
+          <button id="packagingMasterNew" class="primary" type="button">新規追加</button>
+          ${records.length === 0 ? `<div class="empty">包装マスタは登録されていません。</div>` : `
+            <div class="grid menu-grid">
+              ${records.map((record) => `
+                <div class="record-summary">
+                  <strong>${escapeHtml(productNameForId(record.productId))} / ${escapeHtml(record.packagingName)}</strong>
+                  <div>${formatPackagingNumber(record.quantityPerPackage)}本／${formatPackagingNumber(record.netWeightG)}g</div>
+                  <div>${formatPackagingNumber(record.unitWeightG)}g／本・${escapeHtml(record.packageUnit)}</div>
+                  <div>表示順：${record.displayOrder} / ${record.isActive ? "使用中" : "停止中"}</div>
+                  <div class="note">包装ID：${escapeHtml(record.packagingId)} / 商品ID：${escapeHtml(record.productId)}</div>
+                  <div class="record-actions"><button class="secondary" type="button" data-type="packaging-master-edit" data-id="${escapeHtml(record.packagingId)}">編集</button></div>
+                </div>
+              `).join("")}
+            </div>
+          `}
+        </section>
+      `;
+      document.getElementById("packagingMasterNew").addEventListener("click", () => showPackagingMasterForm());
+    }
+
+    function showPackagingMasterForm(packagingId = "") {
+      const records = loadPackagingMaster();
+      const targetRecord = records.find((item) => item.packagingId === packagingId);
+      if (packagingId && !targetRecord) {
+        showPackagingMasterList();
+        showSaveToast("編集対象の包装情報が見つかりません。", "error");
+        return;
+      }
+      const record = targetRecord || {};
+      setHeader(packagingId ? "包装マスタ編集" : "包装マスタ新規追加", "包装基準", true, showPackagingMasterList);
+      app.innerHTML = `
+        <section class="section">
+          <h2>${packagingId ? "包装マスタ編集" : "包装マスタ新規追加"}</h2>
+          <div class="field-row">
+            ${packagingId ? `
+              <div class="record-summary"><div>包装ID：${escapeHtml(record.packagingId)}</div><div>商品ID：${escapeHtml(record.productId)}</div><div>商品名：${escapeHtml(productNameForId(record.productId))}</div></div>
+              <input id="packagingProductId" type="hidden" value="${escapeHtml(record.productId)}">
+            ` : `
+              <label>商品名
+                <select id="packagingProductId">${PRODUCT_MASTER.map((product) => `<option value="${escapeHtml(product.productId)}">${escapeHtml(product.productName)}</option>`).join("")}</select>
+              </label>
+            `}
+            <label>包装名称
+              <input id="packagingName" type="text" value="${escapeHtml(record.packagingName || "")}">
+            </label>
+            <label>内容本数
+              <input id="packagingQuantity" type="number" inputmode="numeric" min="1" step="1" value="${escapeHtml(record.quantityPerPackage || "")}">
+            </label>
+            <label>内容量(g)
+              <input id="packagingNetWeight" type="number" inputmode="decimal" min="0.1" step="0.1" value="${escapeHtml(record.netWeightG || "")}">
+            </label>
+            <label>1本重量(g)
+              <input id="packagingUnitWeight" type="number" inputmode="decimal" min="0.1" step="0.1" value="${escapeHtml(record.unitWeightG || "")}">
+            </label>
+            <label>包装単位
+              <select id="packagingUnit"><option value="本" ${record.packageUnit === "本" ? "selected" : ""}>本</option><option value="パック" ${record.packageUnit !== "本" ? "selected" : ""}>パック</option></select>
+            </label>
+            <label>表示順
+              <input id="packagingDisplayOrder" type="number" inputmode="numeric" min="0" step="1" value="${record.displayOrder != null ? record.displayOrder : 1}">
+            </label>
+            <label><span class="packaging-active-toggle"><input id="packagingIsActive" class="packaging-active-checkbox" type="checkbox" ${record.isActive !== false ? "checked" : ""}>使用中</span></label>
+            <button id="packagingMasterSave" class="primary" type="button">保存</button>
+          </div>
+        </section>
+      `;
+      const quantity = document.getElementById("packagingQuantity");
+      const netWeight = document.getElementById("packagingNetWeight");
+      const unitWeight = document.getElementById("packagingUnitWeight");
+      const calculateUnitWeight = () => {
+        const pieces = Number(quantity.value || 0);
+        const weight = Number(netWeight.value || 0);
+        if (pieces > 0 && weight > 0) unitWeight.value = String(Number((weight / pieces).toFixed(1)));
+      };
+      [quantity, netWeight].forEach((element) => element.addEventListener("input", calculateUnitWeight));
+      document.getElementById("packagingMasterSave").addEventListener("click", () => savePackagingMasterForm(packagingId));
+      if (!packagingId) calculateUnitWeight();
+    }
+
+    function savePackagingMasterForm(packagingId = "") {
+      const productId = document.getElementById("packagingProductId").value;
+      const packagingName = document.getElementById("packagingName").value.trim();
+      const quantityPerPackage = Number(document.getElementById("packagingQuantity").value);
+      const netWeightG = Number(document.getElementById("packagingNetWeight").value);
+      const unitWeightG = Number(document.getElementById("packagingUnitWeight").value);
+      const packageUnit = document.getElementById("packagingUnit").value;
+      const displayOrder = Number(document.getElementById("packagingDisplayOrder").value);
+      const isActive = document.getElementById("packagingIsActive").checked;
+      if (!productId || !packagingName || !Number.isInteger(quantityPerPackage) || quantityPerPackage < 1 || !Number.isFinite(netWeightG) || netWeightG <= 0 || !Number.isFinite(unitWeightG) || unitWeightG <= 0 || !Number.isInteger(displayOrder) || displayOrder < 0 || !packageUnit) {
+        showSaveToast("包装マスタの入力内容を確認してください。", "error");
+        return;
+      }
+      const records = loadPackagingMaster();
+      if (packagingId && !records.some((record) => record.packagingId === packagingId)) {
+        showSaveToast("編集対象の包装情報が見つかりません。", "error");
+        return;
+      }
+      if (records.some((record) => record.packagingId !== packagingId && record.productId === productId && record.packagingName === packagingName)) {
+        showSaveToast("同じ商品と包装名称が登録されています。", "error");
+        return;
+      }
+      const existing = records.find((record) => record.packagingId === packagingId);
+      const now = new Date().toISOString();
+      const item = {
+        packagingId: packagingId || createRecordId("PACK_CUSTOM").toUpperCase(),
+        productId,
+        packagingName,
+        quantityPerPackage,
+        netWeightG,
+        unitWeightG,
+        packageUnit,
+        displayOrder,
+        isActive,
+        createdAt: existing ? existing.createdAt : now,
+        updatedAt: now
+      };
+      const index = records.findIndex((record) => record.packagingId === packagingId);
+      if (index >= 0) records[index] = item;
+      else records.push(item);
+      try {
+        savePackagingMaster(records);
+        showPackagingMasterList("保存しました");
+        showSaveToast("保存しました。");
+      } catch (error) {
+        showSaveToast("保存できませんでした。もう一度お試しください。", "error");
+      }
     }
 
     function showUnregisteredSavedRecipeList() {
@@ -1053,6 +1383,7 @@
             <label>レシピ名
               <select id="recordRecipe"></select>
             </label>
+            <div id="recordPackagingStandard"></div>
             <label>製造ロット番号
               <input id="recordLot" type="text" readonly>
             </label>
@@ -1119,6 +1450,7 @@
     function recordRecipeOptions(category = "自社レシピ") {
       const own = [
         { id: "own:arabiki", category: "自社レシピ", label: "あらびき", savedRecipeName: "あらびき", packagingKey: "arabiki", recipe: ownRecipes.arabiki },
+        { id: "own:additiveFreeArabiki", category: "自社レシピ", label: "無添加あらびき", savedRecipeName: "無添加あらびき", packagingKey: "", recipe: ownRecipes.additiveFreeArabiki },
         { id: "own:cheese", category: "自社レシピ", label: "チーズ", savedRecipeName: "チーズ", packagingKey: "cheese", recipe: ownRecipes.cheese },
         { id: "own:herbProduct", category: "自社レシピ", label: "ハーブ（製品用）", savedRecipeName: "ハーブ", packagingKey: "herbProduct", recipe: ownRecipes.herb },
         { id: "own:herbEvent", category: "自社レシピ", label: "ハーブ（イベント用）", savedRecipeName: "ハーブ", packagingKey: "herbEvent", recipe: ownRecipes.herb },
@@ -1154,6 +1486,7 @@
     }
 
     function recipeCodeForRecipe(recipe) {
+      if (recipe.recipeId === ADDITIVE_FREE_RECIPE_ID || recipe.kind === "fixed-own") return "ADDITIVE-FREE-ARABIKI";
       if (recipe.kind === "yamanoya") return "YAMAGOYA";
       if (recipe.kind === "gibier") return "GIBIER";
       if (recipe.kind === "touge") return "TOUGE";
@@ -1165,11 +1498,25 @@
     }
 
     function recipeRecordCategory(recipe) {
-      return recipe.kind === "own" ? "自社レシピ" : "委託製造";
+      return recipe.kind === "own" || recipe.kind === "fixed-own" ? "自社レシピ" : "委託製造";
     }
 
     function packagingSpecForRecordOption(option) {
       if (!option || option.category !== "自社レシピ") return null;
+      if (option.recipe && option.recipe.recipeId === ADDITIVE_FREE_RECIPE_ID) {
+        const registered = loadPackagingMaster()
+          .filter((item) => item.productId === ADDITIVE_FREE_PRODUCT_ID && item.isActive !== false)
+          .sort((a, b) => Number(a.displayOrder || 0) - Number(b.displayOrder || 0))[0];
+        if (!registered) return null;
+        return {
+          unit: registered.packageUnit,
+          countLabel: registered.packageUnit === "本" ? "完成本数" : "包装数",
+          unitWeightLabel: registered.packageUnit === "本" ? "1本重量" : "1包装重量",
+          unitPiecesLabel: registered.packageUnit === "本" ? "" : "1包装本数",
+          unitWeight: Number(registered.netWeightG),
+          unitPieces: Number(registered.quantityPerPackage)
+        };
+      }
       return ownPackagingSpecs[option.packagingKey] || null;
     }
 
@@ -1294,6 +1641,7 @@
     }
 
     function savedRecipeReadHtml(record) {
+      const isAdditiveFree = record.recipeId === ADDITIVE_FREE_RECIPE_ID || record.recipeKind === "fixed-own";
       return `
         <div class="record-summary">
           <div>仕込み日：${escapeHtml(record.prepDate || "")}</div>
@@ -1307,12 +1655,29 @@
           <div>合計重量：${formatRecordNumber(record.totalWeight)}g</div>
           <div>メモ：${escapeHtml(record.memo || "")}</div>
         </div>
-        ${meatInfoHtml({ meat6mm: Number(record.meat6mm || 0), meat3mm: Number(record.meat3mm || 0), meatTotal: Number(record.meatTotal || 0) })}
-        ${tableHtml(record.rows || [], Number(record.total || 0))}
+        ${isAdditiveFree ? additiveFreeTableHtml(additiveFreeDisplayRows(), 4423.6) : `${meatInfoHtml({ meat6mm: Number(record.meat6mm || 0), meat3mm: Number(record.meat3mm || 0), meatTotal: Number(record.meatTotal || 0) })}${tableHtml(record.rows || [], Number(record.total || 0))}`}
       `;
     }
 
     function savedRecipeEditHtml(record) {
+      if (record.recipeId === ADDITIVE_FREE_RECIPE_ID || record.recipeKind === "fixed-own") {
+        return `
+          <div class="record-summary">
+            <div>製造区分：${escapeHtml(record.category || "")}</div>
+            <div>レシピ名：${escapeHtml(record.recipeName || "")}</div>
+          </div>
+          <div class="field-row">
+            <label>仕込み日
+              <input id="savedRecipePrepDate" type="date" value="${escapeHtml(record.prepDate || todayString())}">
+            </label>
+            <label>メモ
+              <textarea id="savedRecipeMemo">${escapeHtml(record.memo || "")}</textarea>
+            </label>
+          </div>
+          <p class="note">固定配合のため材料重量は変更できません。</p>
+          <div id="savedRecipePreview"></div>
+        `;
+      }
       return `
         <div class="record-summary">
           <div>製造区分：${escapeHtml(record.category || "")}</div>
@@ -1342,14 +1707,15 @@
       const meat3mm = document.getElementById("savedRecipeMeat3mm");
       const memo = document.getElementById("savedRecipeMemo");
       const preview = document.getElementById("savedRecipePreview");
+      const isFixedOwn = record.recipeId === ADDITIVE_FREE_RECIPE_ID || record.recipeKind === "fixed-own";
       const renderPreview = () => {
-        const updated = recalculateSavedRecipe(record, Number(meat6mm.value || 0), Number(meat3mm.value || 0), prepDate.value, memo.value);
+        const updated = recalculateSavedRecipe(record, meat6mm ? Number(meat6mm.value || 0) : record.meat6mm, meat3mm ? Number(meat3mm.value || 0) : record.meat3mm, prepDate.value, memo.value);
         preview.innerHTML = `${meatInfoHtml({ meat6mm: updated.meat6mm, meat3mm: updated.meat3mm, meatTotal: updated.meatTotal })}${tableHtml(updated.rows, updated.total)}`;
       };
-      [prepDate, meat6mm, meat3mm, memo].forEach((element) => element.addEventListener("input", renderPreview));
+      [prepDate, meat6mm, meat3mm, memo].filter(Boolean).forEach((element) => element.addEventListener("input", renderPreview));
       document.getElementById("savedRecipeCancel").addEventListener("click", () => showSavedRecipeDetail(savedRecipeRecordId(record)));
       document.getElementById("savedRecipeSave").addEventListener("click", () => {
-        const updated = recalculateSavedRecipe(record, Number(meat6mm.value || 0), Number(meat3mm.value || 0), prepDate.value, memo.value);
+        const updated = recalculateSavedRecipe(record, isFixedOwn ? record.meat6mm : Number(meat6mm.value || 0), isFixedOwn ? record.meat3mm : Number(meat3mm.value || 0), prepDate.value, memo.value);
         const records = loadSavedRecipeCalculations();
         const index = records.findIndex((item) => savedRecipeRecordId(item) === savedRecipeRecordId(record));
         if (index >= 0) records[index] = updated;
@@ -1366,6 +1732,20 @@
     }
 
     function recalculateSavedRecipe(record, meat6mmValue, meat3mmValue, prepDate, memo) {
+      if (record.recipeId === ADDITIVE_FREE_RECIPE_ID || record.recipeKind === "fixed-own") {
+        return enrichSavedRecipeCalculation({
+          ...record,
+          prepDate,
+          meat6mm: 1800,
+          meat3mm: 1800,
+          meatTotal: 3600,
+          emulsionWeight: 0,
+          rows: additiveFreeIngredientRows(),
+          total: 823.6,
+          memo,
+          updatedAt: new Date().toISOString()
+        });
+      }
       const meat6mm = Math.max(Number(meat6mmValue || 0), 0);
       const meat3mm = Math.max(Number(meat3mmValue || 0), 0);
       const meatTotal = meat6mm + meat3mm;
@@ -1487,6 +1867,7 @@
       const elements = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
       const savedCalcStatus = document.getElementById("recordSavedCalcStatus");
       const recipeResult = document.getElementById("recordRecipeResult");
+      const packagingStandard = document.getElementById("recordPackagingStandard");
       const packageCountLabel = document.getElementById("recordPackageCountLabel");
       const smokedCountLabel = document.getElementById("recordSmokedCountLabel");
       const unsmokedCountLabel = document.getElementById("recordUnsmokedCountLabel");
@@ -1540,6 +1921,8 @@
         configureTogeControls();
         const record = collectManufacturingRecord(elements);
         const isGibier = record.recipeKind === "gibier";
+        const selectedOption = getRecordRecipeOption(elements.recordRecipe.value, elements.recordCategory.value);
+        packagingStandard.innerHTML = packagingStandardHtml(packagingProductIdForOption(selectedOption));
         elements.recordLot.value = record.lot;
         packageCountLabel.childNodes[0].nodeValue = `${record.packageCountLabel}\n`;
         packageCountLabel.style.display = isGibier ? "none" : "grid";
@@ -1551,7 +1934,9 @@
         }
         if (record.savedCalculation) {
           savedCalcStatus.textContent = "保存済みレシピ計算データを反映しました";
-          recipeResult.innerHTML = `${meatInfoHtml({ meat6mm: record.meat6mm, meat3mm: record.meat3mm, meatTotal: record.meatTotal })}${tableHtml(record.recipeRows, record.recipeTotal)}`;
+          recipeResult.innerHTML = record.recipeKind === "fixed-own"
+            ? additiveFreeTableHtml(additiveFreeDisplayRows(), 4423.6)
+            : `${meatInfoHtml({ meat6mm: record.meat6mm, meat3mm: record.meat3mm, meatTotal: record.meatTotal })}${tableHtml(record.recipeRows, record.recipeTotal)}`;
         } else {
           savedCalcStatus.textContent = "保存済みのレシピ計算データが見つかりません。先にレシピページで計算結果を保存してください。";
           recipeResult.innerHTML = "";
@@ -1871,6 +2256,7 @@
           <div>製造日：${escapeHtml(record.date || "")}</div>
           <div>製造区分：${escapeHtml(record.category || "")}</div>
           <div>レシピ名：${escapeHtml(record.recipeName || record.product || "")}</div>
+          ${packagingStandardHtml(packagingProductIdForRecord(record))}
           <div>ロット番号：${escapeHtml(record.lot || "")}</div>
           <div>肉重量合計：${formatRecordNumber(record.meatTotal)}g</div>
           <div>水：${formatRecordNumber(record.waterAmount)}g</div>
@@ -2068,6 +2454,7 @@
     }
 
     function recipeCodeFromRecord(record) {
+      if (record.recipeCode === "ADDITIVE-FREE-ARABIKI" || record.recipeKind === "fixed-own" || record.recipeName === "無添加あらびき") return "ADDITIVE-FREE-ARABIKI";
       if (record.packagingKey === "arabiki" || record.recipeName === "あらびき") return "ARABIKI";
       if (record.packagingKey === "cheese" || record.recipeName === "チーズ") return "CHEESE";
       if (record.packagingKey === "herbProduct") return "HERB-P";
@@ -2235,6 +2622,11 @@
       const body = document.getElementById("homeRecipeBody");
       const render = () => {
         const recipe = getRecipeByOptionId(select.value);
+        if (recipe.kind === "fixed-own") {
+          body.innerHTML = `<p class="note">固定配合のレシピです。材料重量の入力はありません。</p>${additiveFreeTableHtml(additiveFreeDisplayRows(), 4423.6)}<button id="homeAdditiveFreeDetail" class="primary" type="button">レシピ詳細を開く</button>`;
+          document.getElementById("homeAdditiveFreeDetail").addEventListener("click", showAdditiveFreeRecipe);
+          return;
+        }
         body.innerHTML = recipeCalculatorContentHtml(recipe, "home-recipe", true);
         bindRecipeCalculator(recipe, "home-recipe");
       };
@@ -2242,8 +2634,196 @@
       render();
     }
 
+    function additiveFreeIngredientRows() {
+      return [
+        { name: "氷", group: "固定配合", calculated: 720 },
+        { name: "塩", group: "固定配合", calculated: 73.4 },
+        { name: "スパイス", group: "固定配合", calculated: 30.2 }
+      ];
+    }
+
+    function additiveFreeDisplayRows() {
+      return [
+        { name: "6mm肉", group: "固定配合", calculated: 1800 },
+        { name: "3mm肉（赤身のみ）", group: "固定配合", calculated: 1800 },
+        ...additiveFreeIngredientRows()
+      ];
+    }
+
+    function additiveFreeTableHtml(rows, total) {
+      return `
+        <div class="result-box">
+          ${rows.map((row) => `
+            <div class="result-row">
+              <div class="result-name">${row.name}</div>
+              <div class="result-value">${formatPackagingNumber(row.calculated)}g</div>
+              ${row.group ? `<div class="result-formula">${row.group}</div>` : ""}
+            </div>
+          `).join("")}
+          <div class="result-row"><div class="result-name">合計</div><div class="result-value">${formatPackagingNumber(total)}g</div></div>
+        </div>
+      `;
+    }
+
+    function additiveFreeSavedCalculation(prepDate) {
+      const recipe = ownRecipes.additiveFreeArabiki;
+      return {
+        recipeId: recipe.recipeId,
+        productId: recipe.productId,
+        prepDate,
+        category: "自社レシピ",
+        recipeName: recipe.name,
+        savedRecipeName: recipe.name,
+        recipeCode: recipeCodeForRecipe(recipe),
+        recipeKind: recipe.kind,
+        meat6mm: 1800,
+        meat3mm: 1800,
+        meatTotal: 3600,
+        emulsionWeight: 0,
+        rows: additiveFreeIngredientRows(),
+        total: 823.6,
+        savedAt: new Date().toISOString()
+      };
+    }
+
+    function showAdditiveFreeRecipe() {
+      const recipe = ownRecipes.additiveFreeArabiki;
+      setHeader(recipe.name, "自社レシピ 固定配合", true, () => showCategory("own"));
+      app.innerHTML = `
+        <div class="tabbar" id="additiveFreeTabs">
+          <button class="tab ${appState.additiveFreeTab === "calc" ? "active" : ""}" data-tab="calc" type="button">配合計算</button>
+          <button class="tab ${appState.additiveFreeTab === "spec" ? "active" : ""}" data-tab="spec" type="button">製造仕様</button>
+          <button class="tab ${appState.additiveFreeTab === "spice" ? "active" : ""}" data-tab="spice" type="button">スパイス</button>
+        </div>
+        <div id="additiveFreeBody"></div>
+      `;
+      document.querySelectorAll("#additiveFreeTabs .tab").forEach((button) => {
+        button.addEventListener("click", () => {
+          appState.additiveFreeTab = button.dataset.tab;
+          showAdditiveFreeRecipe();
+        });
+      });
+      renderAdditiveFreeTab(recipe);
+    }
+
+    function renderAdditiveFreeTab(recipe) {
+      const body = document.getElementById("additiveFreeBody");
+      if (appState.additiveFreeTab === "spec") {
+        const spec = recipe.manufacturingSpec;
+        body.innerHTML = `
+          <section class="section">
+            <h2>製造仕様</h2>
+            <ul class="spec-list">
+              <li>長さ: ${spec.length}</li>
+              <li>ケーシング: ${spec.casing}</li>
+              <li>規格袋: ${spec.bagStandard}</li>
+              <li>1袋あたり: ${spec.piecesPerBag}本</li>
+              <li>製造手順: ${spec.instructions.join("<br>")}</li>
+            </ul>
+          </section>
+        `;
+        return;
+      }
+      if (appState.additiveFreeTab === "spice") {
+        body.innerHTML = `
+          <section class="section">
+            <h2>無添加あらびき スパイス配合表</h2>
+            <div class="field-row">
+              <label>回数
+                <select id="additiveFreeSpiceRuns">
+                  <option value="1">1回分</option><option value="2">2回分</option>
+                  <option value="3">3回分</option><option value="4">4回分</option>
+                  <option value="custom">任意回数</option>
+                </select>
+              </label>
+              <label>任意回数
+                <input id="additiveFreeCustomRuns" type="number" min="1" step="1" value="1">
+              </label>
+              <button id="additiveFreeSpiceCopy" class="primary" type="button">スパイス表をコピー</button>
+            </div>
+            <details>
+              <summary>配合表を表示</summary>
+              <div class="details-body" id="additiveFreeSpiceResult"></div>
+            </details>
+            <div class="copy-area">
+              <textarea id="additiveFreeSpiceCopyText" readonly></textarea>
+              <div id="additiveFreeSpiceStatus" class="status"></div>
+            </div>
+          </section>
+        `;
+        bindAdditiveFreeSpiceCalculator();
+        return;
+      }
+      body.innerHTML = `
+        <section class="section">
+          <div class="field-row">
+            <label>仕込日
+              <input id="additiveFreePrepDate" type="date" value="${todayString()}">
+            </label>
+          </div>
+          <div class="product-name">${recipe.name}</div>
+          <p class="note">このレシピは固定配合です。</p>
+          ${additiveFreeTableHtml(additiveFreeDisplayRows(), 4423.6)}
+          <div class="field-row">
+            <button id="additiveFreeCopy" class="secondary" type="button">GoodNotes用コピー</button>
+            <button id="additiveFreeSave" class="primary" type="button">この計算結果を保存</button>
+          </div>
+          <div class="copy-area">
+            <textarea id="additiveFreeCopyText" readonly></textarea>
+            <div id="additiveFreeStatus" class="status"></div>
+          </div>
+        </section>
+      `;
+      const prepDate = document.getElementById("additiveFreePrepDate");
+      const copyText = document.getElementById("additiveFreeCopyText");
+      const buildText = () => {
+        copyText.value = buildCopyText(recipe.name, additiveFreeDisplayRows(), 4423.6, "g", prepDate.value) + "\n\n製造手順\n3mm肉と塩、スパイス、氷をカッターに投入し、乳化生地を作る。\n乳化生地に6mm肉を混ぜ込み、生地とする。\n羊腸20-22を使用\n長さ12cm";
+      };
+      prepDate.addEventListener("input", buildText);
+      document.getElementById("additiveFreeCopy").addEventListener("click", () => copyToClipboard(copyText.value, document.getElementById("additiveFreeStatus")));
+      document.getElementById("additiveFreeSave").addEventListener("click", () => {
+        const button = document.getElementById("additiveFreeSave");
+        button.disabled = true;
+        try {
+          saveRecipeCalculation(additiveFreeSavedCalculation(prepDate.value));
+          showSaveToast("保存しました。");
+        } catch (error) {
+          showSaveToast("保存できませんでした。もう一度お試しください。", "error");
+        } finally {
+          button.disabled = false;
+        }
+      });
+      buildText();
+    }
+
+    function bindAdditiveFreeSpiceCalculator() {
+      const runsSelect = document.getElementById("additiveFreeSpiceRuns");
+      const customRuns = document.getElementById("additiveFreeCustomRuns");
+      const result = document.getElementById("additiveFreeSpiceResult");
+      const copyText = document.getElementById("additiveFreeSpiceCopyText");
+      const render = () => {
+        const runs = runsSelect.value === "custom" ? Math.max(Math.floor(Number(customRuns.value || 1)), 1) : Number(runsSelect.value);
+        customRuns.disabled = runsSelect.value !== "custom";
+        const requiredTotal = ADDITIVE_FREE_SPICE_BLEND.baseTotalG * runs;
+        const rows = ADDITIVE_FREE_SPICE_BLEND.ingredients.map((item) => ({
+          name: item.name,
+          calculated: item.weightG * runs
+        }));
+        result.innerHTML = additiveFreeTableHtml(rows, requiredTotal);
+        copyText.value = [`無添加あらびき スパイス配合表 ${runs}回分`, ...rows.map((row) => `${row.name}：${formatPackagingNumber(row.calculated)}g`), `合計：${formatPackagingNumber(requiredTotal)}g`].join("\n");
+      };
+      runsSelect.addEventListener("change", render);
+      customRuns.addEventListener("input", render);
+      document.getElementById("additiveFreeSpiceCopy").addEventListener("click", () => copyToClipboard(copyText.value, document.getElementById("additiveFreeSpiceStatus")));
+      render();
+    }
+
     function showRecipe(recipeId) {
       const recipe = ownRecipes[recipeId];
+      if (recipe && recipe.recipeId === ADDITIVE_FREE_RECIPE_ID) {
+        showAdditiveFreeRecipe();
+        return;
+      }
       setHeader(recipe.name, "自社レシピ 配合計算", true, () => showCategory("own"));
       app.innerHTML = `<section class="section">${recipeCalculatorContentHtml(recipe, `recipe-${recipeId}`, true)}</section>`;
       bindRecipeCalculator(recipe, `recipe-${recipeId}`);
