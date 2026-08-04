@@ -216,6 +216,14 @@
       margin-bottom: 12px;
     }
 
+    .record-primary-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 14px;
+      align-items: end;
+      margin-bottom: 14px;
+    }
+
     .radio-group {
       display: grid;
       gap: 8px;
@@ -635,15 +643,15 @@
       },
       gibier: {
         name: "ジビエセンター",
-        description: "鹿ソーセージ",
-        recipe: { name: "ジビエセンター 鹿ソーセージ", productName: "鹿ソーセージ", kind: "gibier" },
-        specs: ["商品名: 鹿ソーセージ", "長さ: 15cm", "ケーシング: 羊腸24-26", "袋詰め: なし"],
+        description: "ジビエセンター鹿ソーセージ",
+        recipe: { name: "ジビエセンター鹿ソーセージ", productName: "ジビエセンター鹿ソーセージ", kind: "gibier" },
+        specs: ["商品名: ジビエセンター鹿ソーセージ", "長さ: 15cm", "ケーシング: 羊腸24-26", "袋詰め: なし"],
         notes: ["鹿肉: ジビエセンターから支給", "豚ひき肉: エーコープで仕入"]
       },
       zanzatei: {
         name: "ざんざ亭",
-        description: "鹿ソーセージ",
-        suppliedDough: { productName: "鹿ソーセージ" },
+        description: "ざんざ亭鹿ソーセージ",
+        suppliedDough: { productName: "ざんざ亭鹿ソーセージ" },
         specs: [
           "生地支給: レシピなし",
           "挽き目: 生地全量を6mmで挽く",
@@ -787,7 +795,22 @@
     }
 
     function yieldDisplayText(record) {
-      return record.yieldRate == null ? "計算不可" : `${formatRecordNumber(record.yieldRate)}%`;
+      const actualYield = record.actualYieldPercent != null ? record.actualYieldPercent : record.yieldRate;
+      return actualYield == null ? "計算不可" : `${formatRecordNumber(actualYield)}%`;
+    }
+
+    function manufacturingCountForRecord(record) {
+      if (isGibierManufacturingRecord(record)) return Number(record.completedCount || 0);
+      return Number(record.packagingUnit === "本" ? record.completedCount : record.packageCount) || 0;
+    }
+
+    function inferSavedUnitWeight(record, actualFinishedWeight) {
+      const stored = record.savedUnitWeightG != null ? record.savedUnitWeightG : (record.unitWeight != null ? record.unitWeight : record.packWeight);
+      if (stored != null && stored !== "" && Number.isFinite(Number(stored)) && Number(stored) > 0) return Number(stored);
+      const count = manufacturingCountForRecord(record);
+      const allocatedWeight = Number(record.togeAllocatedWeight || 0);
+      const baseWeight = actualFinishedWeight == null ? null : Number(actualFinishedWeight) - allocatedWeight;
+      return count > 0 && baseWeight != null && Number.isFinite(baseWeight) && baseWeight > 0 ? baseWeight / count : null;
     }
 
     function isGibierManufacturingRecord(record) {
@@ -1365,37 +1388,26 @@
       setHeader("新規製造記録", "既存レシピから記録", true, backHandler);
       app.innerHTML = `
         <input id="recordSavedRecipeId" type="hidden" value="${escapeHtml(draft.recordSavedRecipeId || "")}">
+        <select id="recordCategory" hidden><option value="自社レシピ">自社レシピ</option><option value="委託製造">委託製造</option></select>
+        <select id="recordRecipe" hidden></select>
         <section class="section">
           <h2>基本情報</h2>
-          <div class="field-row">
-            <label>仕込み日
-              <input id="recordPrepDate" type="date" value="${todayString()}">
+          <div class="record-primary-row">
+            <label>仕込日
+              <input id="recordPrepDate" type="date" value="${todayString()}" readonly>
             </label>
+            <label>レシピ名
+              <div class="product-name" id="recordRecipeNameDisplay"></div>
+            </label>
+          </div>
+          <div class="field-row">
             <label>製造日
               <input id="recordDate" type="date" value="${todayString()}">
             </label>
-            <label>製造区分
-              <select id="recordCategory">
-                <option value="自社レシピ">自社レシピ</option>
-                <option value="委託製造">委託製造</option>
-              </select>
-            </label>
-            <label>レシピ名
-              <select id="recordRecipe"></select>
-            </label>
-            <div id="recordPackagingStandard"></div>
             <label>製造ロット番号
               <input id="recordLot" type="text" readonly>
             </label>
-            <label>メモ
-              <textarea id="recordMemo"></textarea>
-            </label>
           </div>
-        </section>
-        <section class="section">
-          <h2>レシピ由来の情報</h2>
-          <div id="recordSavedCalcStatus" class="empty"></div>
-          <div id="recordRecipeResult"></div>
         </section>
         <section class="section">
           <h2>製造数記録</h2>
@@ -1412,9 +1424,6 @@
             <label>ロス本数（本）
               <input id="recordLossCount" type="number" inputmode="numeric" min="0" step="1" value="0">
             </label>
-            <label>余り重量(g)
-              <input id="recordLeftoverWeight" type="number" inputmode="decimal" min="0" step="0.1" value="0">
-            </label>
             <label id="recordTogeAllocationToggleLabel" style="display:none">
               <span class="toge-allocation-toggle"><input id="recordTogeAllocationEnabled" class="toge-allocation-checkbox" type="checkbox">峠の茶屋用に振り分ける</span>
             </label>
@@ -1430,11 +1439,20 @@
               <div class="product-name" id="recordTogeWeightDisplay">使用重量：0.0g</div>
               <div id="recordTogeStatus" class="status"></div>
             </div>
-            <div class="product-name" id="recordPackWeightDisplay">1袋重量: 未設定</div>
-            <div class="product-name" id="recordPackCountDisplay">1袋本数: 未設定</div>
             <div class="product-name" id="recordCompletedCountDisplay" style="display:none">完成本数: 0本</div>
+          </div>
+        </section>
+        <section class="section">
+          <h2>その他の製造記録入力</h2>
+          <div class="field-row">
+            <label>余り重量(g)
+              <input id="recordLeftoverWeight" type="number" inputmode="decimal" min="0" step="0.1" value="0">
+            </label>
+            <label>メモ
+              <textarea id="recordMemo"></textarea>
+            </label>
             <div class="product-name" id="recordFinishedWeightDisplay">完成重量: 計算不可</div>
-            <div class="product-name" id="recordYieldDisplay">歩留まり率: 0.0%</div>
+            <div class="product-name" id="recordYieldDisplay">実績歩留まり: 0.0%</div>
             <button id="recordGoodNotes" class="secondary" type="button">GoodNotes転記</button>
             <button id="recordSave" class="primary" type="button">保存</button>
           </div>
@@ -1442,6 +1460,14 @@
             <textarea id="recordGoodNotesText" readonly></textarea>
             <div id="recordStatus" class="status"></div>
           </div>
+        </section>
+        <section class="section">
+          <h2>レシピ由来の情報</h2>
+          <div id="recordSavedCalcStatus" class="empty"></div>
+          <div id="recordRecipeResult"></div>
+          <div id="recordPackagingStandard"></div>
+          <div class="product-name" id="recordPackWeightDisplay">1袋重量: 未設定</div>
+          <div class="product-name" id="recordPackCountDisplay">1袋本数: 未設定</div>
         </section>
       `;
       bindManufacturingRecordForm(draft);
@@ -1480,7 +1506,7 @@
 
     function recordRecipeDisplayName(recipe) {
       if (recipe.kind === "yamanoya") return "山小屋 / スパイスソーセージ";
-      if (recipe.kind === "gibier") return "ジビエセンター / 鹿ソーセージ";
+      if (recipe.kind === "gibier") return recipe.productName || recipe.name;
       if (recipe.kind === "touge") return `峠の茶屋 / ${recipe.productName || recipe.name}`;
       return recipe.productName || recipe.name;
     }
@@ -1503,21 +1529,20 @@
 
     function packagingSpecForRecordOption(option) {
       if (!option || option.category !== "自社レシピ") return null;
-      if (option.recipe && option.recipe.recipeId === ADDITIVE_FREE_RECIPE_ID) {
-        const registered = loadPackagingMaster()
-          .filter((item) => item.productId === ADDITIVE_FREE_PRODUCT_ID && item.isActive !== false)
-          .sort((a, b) => Number(a.displayOrder || 0) - Number(b.displayOrder || 0))[0];
-        if (!registered) return null;
-        return {
-          unit: registered.packageUnit,
-          countLabel: registered.packageUnit === "本" ? "完成本数" : "包装数",
-          unitWeightLabel: registered.packageUnit === "本" ? "1本重量" : "1包装重量",
-          unitPiecesLabel: registered.packageUnit === "本" ? "" : "1包装本数",
-          unitWeight: Number(registered.netWeightG),
-          unitPieces: Number(registered.quantityPerPackage)
-        };
-      }
-      return ownPackagingSpecs[option.packagingKey] || null;
+      const productId = packagingProductIdForOption(option);
+      const packagingName = option.packagingKey === "herbEvent" ? "イベント" : "通常";
+      const registered = loadPackagingMaster()
+        .filter((item) => item.productId === productId && item.packagingName === packagingName && item.isActive !== false)
+        .sort((a, b) => Number(a.displayOrder || 0) - Number(b.displayOrder || 0))[0];
+      if (!registered) return null;
+      return {
+        unit: registered.packageUnit,
+        countLabel: registered.packageUnit === "本" ? "完成本数" : "包装数",
+        unitWeightLabel: registered.packageUnit === "本" ? "1本重量" : "1包装重量",
+        unitPiecesLabel: registered.packageUnit === "本" ? "" : "1包装本数",
+        unitWeight: Number(registered.netWeightG),
+        unitPieces: Number(registered.quantityPerPackage)
+      };
     }
 
     function loadSavedRecipeCalculations() {
@@ -1867,6 +1892,7 @@
       const elements = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
       const savedCalcStatus = document.getElementById("recordSavedCalcStatus");
       const recipeResult = document.getElementById("recordRecipeResult");
+      const recipeNameDisplay = document.getElementById("recordRecipeNameDisplay");
       const packagingStandard = document.getElementById("recordPackagingStandard");
       const packageCountLabel = document.getElementById("recordPackageCountLabel");
       const smokedCountLabel = document.getElementById("recordSmokedCountLabel");
@@ -1922,6 +1948,7 @@
         const record = collectManufacturingRecord(elements);
         const isGibier = record.recipeKind === "gibier";
         const selectedOption = getRecordRecipeOption(elements.recordRecipe.value, elements.recordCategory.value);
+        recipeNameDisplay.textContent = selectedOption.label;
         packagingStandard.innerHTML = packagingStandardHtml(packagingProductIdForOption(selectedOption));
         elements.recordLot.value = record.lot;
         packageCountLabel.childNodes[0].nodeValue = `${record.packageCountLabel}\n`;
@@ -1948,7 +1975,7 @@
         completedCountDisplay.style.display = isGibier ? "block" : "none";
         completedCountDisplay.textContent = `完成本数: ${record.completedCount || 0}本`;
         finishedWeightDisplay.textContent = `完成重量: ${record.finishedWeight == null ? "計算不可" : `${formatRecordNumber(record.finishedWeight)}g`}`;
-        yieldDisplay.textContent = `歩留まり率: ${yieldDisplayText(record)}`;
+        yieldDisplay.textContent = `実績歩留まり: ${yieldDisplayText(record)}`;
         togeWeightDisplay.textContent = `使用重量：${formatRecordNumber(record.togeAllocatedWeight)}g`;
         togeStatus.textContent = record.togeAllocationEnabled ? togeAllocationState(record.togeAllocationId, record).message : "";
         togeStatus.style.whiteSpace = "pre-line";
@@ -1983,6 +2010,10 @@
         recordSaveButton.disabled = true;
         try {
           const record = collectManufacturingRecord(elements);
+          if (record.savedUnitWeightG == null || !Number.isFinite(Number(record.savedUnitWeightG)) || Number(record.savedUnitWeightG) <= 0) {
+            showSaveToast("製品マスタに基準重量が登録されていないため保存できません。", "error");
+            return;
+          }
           const allocationError = validateTogeAllocation(record);
           if (allocationError) {
             showSaveToast(allocationError, "error");
@@ -2083,7 +2114,10 @@
         togeAllocatedWeight,
         togeComponentType: togeAllocationEnabled ? togeComponentType : "",
         finishedWeight,
-        yieldRate
+        yieldRate,
+        savedUnitWeightG: unitWeight,
+        actualFinishedWeightG: finishedWeight,
+        actualYieldPercent: yieldRate
       };
     }
 
@@ -2113,7 +2147,7 @@
         `ロス本数：${record.lossCount || ""}`,
         `余り重量：${formatRecordNumber(record.leftoverWeight || 0)}g`,
         `完成重量：${record.finishedWeight == null ? "計算不可" : `${formatRecordNumber(record.finishedWeight)}g`}`,
-        `歩留まり率：${yieldDisplayText(record)}`,
+        `実績歩留まり：${yieldDisplayText(record)}`,
         "",
         `メモ：${record.memo || ""}`
       ];
@@ -2122,12 +2156,10 @@
 
     function loadManufacturingRecords() {
       const parsed = readStorageArray(MANUFACTURING_RECORDS_KEY, OLD_MANUFACTURING_RECORDS_KEY);
-      let changed = false;
       const normalized = parsed.map((record, index) => {
         let item = record;
         if (!item.manufacturingRecordId && !item.id) {
-          changed = true;
-          const manufacturingRecordId = `manufacturing-record-${item.savedAt || item.createdAt || Date.now()}-${index}`;
+          const manufacturingRecordId = `manufacturing-record-${item.savedAt || item.createdAt || "legacy"}-${index}`;
           item = { ...item, id: manufacturingRecordId, manufacturingRecordId };
         }
         const packagingUnit = item.packagingUnit || (item.packageCountLabel === "完成本数" ? "本" : (item.packageCountLabel ? "袋" : ""));
@@ -2141,15 +2173,18 @@
         const waterAmount = Number(amountFromRows(recipeRows, "水"));
         const ingredientTotal = sumIngredientRows(recipeRows);
         const totalWeight = meatTotal + ingredientTotal;
-        const theoreticalFinishedWeight = totalWeight;
+        const theoreticalFinishedWeight = Number(item.theoreticalFinishedWeight || 0) > 0 ? Number(item.theoreticalFinishedWeight) : totalWeight;
         const hasGibierCounts = Object.prototype.hasOwnProperty.call(item, "smokedCount") || Object.prototype.hasOwnProperty.call(item, "unsmokedCount");
         const gibierMetrics = calculateGibierProductionMetrics(smokedCount, unsmokedCount, theoreticalFinishedWeight);
-        const finishedWeight = isGibierManufacturingRecord(item) && hasGibierCounts
-          ? gibierMetrics.actualCompletedWeight
-          : (item.finishedWeight == null || item.finishedWeight === "" ? null : Number(item.finishedWeight));
-        const yieldRate = isGibierManufacturingRecord(item) && hasGibierCounts
-          ? gibierMetrics.yieldRate
-          : (finishedWeight == null || theoreticalFinishedWeight <= 0 ? null : finishedWeight / theoreticalFinishedWeight * 100);
+        const storedFinishedWeight = item.actualFinishedWeightG != null ? item.actualFinishedWeightG : item.finishedWeight;
+        const finishedWeight = storedFinishedWeight == null || storedFinishedWeight === ""
+          ? (isGibierManufacturingRecord(item) && hasGibierCounts ? gibierMetrics.actualCompletedWeight : null)
+          : Number(storedFinishedWeight);
+        const storedYieldRate = item.actualYieldPercent != null ? item.actualYieldPercent : item.yieldRate;
+        const yieldRate = storedYieldRate == null || storedYieldRate === ""
+          ? (finishedWeight == null || theoreticalFinishedWeight <= 0 ? null : finishedWeight / theoreticalFinishedWeight * 100)
+          : Number(storedYieldRate);
+        const savedUnitWeightG = inferSavedUnitWeight({ ...item, packagingUnit, packageCount, completedCount }, finishedWeight);
         const normalizedItem = {
           ...item,
           packagingUnit,
@@ -2163,14 +2198,13 @@
           leftoverWeight: item.leftoverWeight || "0",
           recipeTotal,
           finishedWeight,
-          yieldRate
+          yieldRate,
+          savedUnitWeightG,
+          actualFinishedWeightG: finishedWeight,
+          actualYieldPercent: yieldRate
         };
-        if (JSON.stringify(normalizedItem) !== JSON.stringify(item)) changed = true;
         return normalizedItem;
       });
-      if (changed) {
-        localStorage.setItem(MANUFACTURING_RECORDS_KEY, JSON.stringify(normalized));
-      }
       return normalized;
     }
 
@@ -2195,7 +2229,7 @@
               ${records.map((record) => `
                 <button class="menu-button" type="button" data-type="record-detail" data-id="${manufacturingRecordId(record)}">
                   <strong>${escapeHtml(record.date || "日付未入力")} ${escapeHtml(record.recipeName || record.product || "レシピ未入力")}</strong>
-                  <span>仕込み日: ${escapeHtml(record.prepDate || "")} / ${escapeHtml(record.category || "")} / ロット: ${escapeHtml(record.lot || "未入力")} / ${escapeHtml(record.packagingUnit === "本" ? "完成本数" : "包装数")}: ${escapeHtml((record.packagingUnit === "本" ? record.completedCount : record.packageCount) || "0")} / ロス本数: ${escapeHtml(record.lossCount || "0")} / 歩留まり: ${yieldDisplayText(record)}</span>
+                  <span>仕込み日: ${escapeHtml(record.prepDate || "")} / ${escapeHtml(record.category || "")} / ロット: ${escapeHtml(record.lot || "未入力")} / ${escapeHtml(record.packagingUnit === "本" ? "完成本数" : "包装数")}: ${escapeHtml((record.packagingUnit === "本" ? record.completedCount : record.packageCount) || "0")} / ロス本数: ${escapeHtml(record.lossCount || "0")} / 実績歩留まり: ${yieldDisplayText(record)}</span>
                 </button>
               `).join("")}
             </div>
@@ -2213,9 +2247,10 @@
       }
       app.innerHTML = `
         <section class="section">
-          <h2>${escapeHtml(record.recipeName || record.product || "レシピ未入力")}</h2>
+          ${editMode ? "" : `<h2>${escapeHtml(record.recipeName || record.product || "レシピ未入力")}</h2>`}
           ${message ? `<div class="status">${escapeHtml(message)}</div>` : ""}
           ${editMode ? manufacturingRecordEditHtml(record) : manufacturingRecordReadHtml(record)}
+          ${editMode && record.recipeRows && record.recipeRows.length ? `<h2>レシピ由来の情報</h2>` : ""}
           ${record.recipeRows && record.recipeRows.length ? meatInfoHtml({ meat6mm: Number(record.meat6mm || 0), meat3mm: Number(record.meat3mm || 0), meatTotal: Number(record.meatTotal || 0) }) + tableHtml(record.recipeRows, Number(record.recipeTotal || 0)) : ""}
           <div class="copy-area">
             <textarea id="recordDetailText" readonly></textarea>
@@ -2245,7 +2280,7 @@
       }
     }
 
-    function manufacturingRecordReadHtml(record) {
+    function manufacturingRecordReadHtml(record, hideCategory = false) {
       const isGibier = isGibierManufacturingRecord(record);
       const countLabel = record.packagingUnit === "本" ? "完成本数" : "包装数";
       const countValue = record.packagingUnit === "本" ? record.completedCount : record.packageCount;
@@ -2254,7 +2289,7 @@
         <div class="record-summary">
           <div>仕込み日：${escapeHtml(record.prepDate || "")}</div>
           <div>製造日：${escapeHtml(record.date || "")}</div>
-          <div>製造区分：${escapeHtml(record.category || "")}</div>
+          ${hideCategory ? "" : `<div>製造区分：${escapeHtml(record.category || "")}</div>`}
           <div>レシピ名：${escapeHtml(record.recipeName || record.product || "")}</div>
           ${packagingStandardHtml(packagingProductIdForRecord(record))}
           <div>ロット番号：${escapeHtml(record.lot || "")}</div>
@@ -2270,7 +2305,7 @@
           <div>ロス本数：${escapeHtml(record.lossCount || "")}</div>
           <div>余り重量：${formatRecordNumber(record.leftoverWeight || 0)}g</div>
           <div>完成重量：${record.finishedWeight == null ? "計算不可" : `${formatRecordNumber(record.finishedWeight)}g`}</div>
-          <div>歩留まり率：${yieldDisplayText(record)}</div>
+          <div>実績歩留まり：${yieldDisplayText(record)}</div>
           ${record.togeAllocationEnabled ? `
             <div>峠の茶屋振分ID：${escapeHtml(record.togeAllocationId || "")}</div>
             <div>峠の茶屋用本数：${escapeHtml(record.togePieceCount || "0")}本</div>
@@ -2288,17 +2323,24 @@
       const allocationOptions = togeComponentType ? availableTogeAllocations(togeComponentType, manufacturingRecordId(record)) : [];
       const currentAllocationId = record.togeAllocationId || "";
       return `
-        <div class="record-summary">
-          <div>製造区分：${escapeHtml(record.category || "")}</div>
-          <div>レシピ名：${escapeHtml(record.recipeName || "")}</div>
+        <div class="record-primary-row">
+          <label>仕込日
+            <input id="editRecordPrepDate" type="date" value="${escapeHtml(record.prepDate || todayString())}" readonly>
+          </label>
+          <label>レシピ名
+            <div class="product-name">${escapeHtml(record.recipeName || "")}</div>
+          </label>
         </div>
         <div class="field-row">
-          <label>仕込み日
-            <input id="editRecordPrepDate" type="date" value="${escapeHtml(record.prepDate || todayString())}">
-          </label>
           <label>製造日
             <input id="editRecordDate" type="date" value="${escapeHtml(record.date || todayString())}">
           </label>
+          <label>製造ロット番号
+            <input type="text" value="${escapeHtml(record.lot || "")}" readonly>
+          </label>
+        </div>
+        <h2>製造数記録</h2>
+        <div class="field-row">
           ${isGibier ? `
           <label>燻製本数（本）
             <input id="editRecordSmokedCount" type="number" inputmode="numeric" min="0" step="1" value="${escapeHtml(record.smokedCount || "0")}">
@@ -2311,9 +2353,6 @@
           </label>`}
           <label>ロス本数（本）
             <input id="editRecordLossCount" type="number" inputmode="numeric" min="0" step="1" value="${escapeHtml(record.lossCount || "0")}">
-          </label>
-          <label>余り重量(g)
-            <input id="editRecordLeftoverWeight" type="number" inputmode="decimal" min="0" step="0.1" value="${escapeHtml(record.leftoverWeight || "0")}">
           </label>
           ${togeComponentType ? `
           <label><span class="toge-allocation-toggle"><input id="editRecordTogeAllocationEnabled" class="toge-allocation-checkbox" type="checkbox" ${record.togeAllocationEnabled ? "checked" : ""}>峠の茶屋用に振り分ける</span></label>
@@ -2332,6 +2371,12 @@
             </label>
           </div>
           ` : ""}
+        </div>
+        <h2>その他の製造記録入力</h2>
+        <div class="field-row">
+          <label>余り重量(g)
+            <input id="editRecordLeftoverWeight" type="number" inputmode="decimal" min="0" step="0.1" value="${escapeHtml(record.leftoverWeight || "0")}">
+          </label>
           <label>メモ
             <textarea id="editRecordMemo">${escapeHtml(record.memo || "")}</textarea>
           </label>
@@ -2364,7 +2409,7 @@
         if (togeFields) togeFields.style.display = togeEnabled.checked ? "grid" : "none";
         const allocation = allocationValues();
         const updated = recalculateManufacturingRecord(record, prepDate.value, date.value, packageCount ? packageCount.value : "", lossCount.value, leftoverWeight.value, memo.value, smokedCount ? smokedCount.value : "0", unsmokedCount ? unsmokedCount.value : "0", allocation.enabled, allocation.id, allocation.pieceCount);
-        preview.innerHTML = manufacturingRecordReadHtml(updated);
+        preview.innerHTML = manufacturingRecordReadHtml(updated, true);
         document.getElementById("recordDetailText").value = buildManufacturingRecordText(updated);
       };
       [prepDate, date, packageCount, smokedCount, unsmokedCount, lossCount, leftoverWeight, memo, togeEnabled, togeId, togePieceCount].filter(Boolean).forEach((element) => element.addEventListener("input", renderPreview));
@@ -2383,6 +2428,13 @@
         try {
           const allocation = allocationValues();
           const updated = recalculateManufacturingRecord(record, prepDate.value, date.value, packageCount ? packageCount.value : "", lossCount.value, leftoverWeight.value, memo.value, smokedCount ? smokedCount.value : "0", unsmokedCount ? unsmokedCount.value : "0", allocation.enabled, allocation.id, allocation.pieceCount);
+          const quantityChanged = manufacturingCountForRecord(updated) !== manufacturingCountForRecord(record)
+            || Number(updated.togePieceCount || 0) !== Number(record.togePieceCount || 0)
+            || Boolean(updated.togeAllocationEnabled) !== Boolean(record.togeAllocationEnabled);
+          if (quantityChanged && (updated.savedUnitWeightG == null || !Number.isFinite(Number(updated.savedUnitWeightG)) || Number(updated.savedUnitWeightG) <= 0)) {
+            showSaveToast("保存時基準重量がないため、完成数量を変更できません。", "error");
+            return;
+          }
           const allocationError = validateTogeAllocation(updated, manufacturingRecordId(record));
           if (allocationError) {
             showSaveToast(allocationError, "error");
@@ -2411,14 +2463,23 @@
       const smokedCount = isGibier ? gibierMetrics.smokedCount : Number(record.smokedCount || 0);
       const unsmokedCount = isGibier ? gibierMetrics.unsmokedCount : Number(record.unsmokedCount || 0);
       const count = isGibier ? gibierMetrics.completedCount : Number(countValue || 0);
-      const unitWeight = isGibier ? 70 : (record.unitWeight == null && record.packWeight == null ? null : Number(record.unitWeight != null ? record.unitWeight : record.packWeight));
+      const unitWeight = inferSavedUnitWeight(record, record.actualFinishedWeightG != null ? record.actualFinishedWeightG : record.finishedWeight);
       const togeComponentType = togeComponentTypeForRecord(record);
       const togeAllocationEnabled = Boolean(togeComponentType && togeEnabledValue);
       const togePieceCount = togeAllocationEnabled ? Number(togePieceValue || 0) : 0;
       const togeAllocatedWeight = togeAllocationEnabled && Number.isFinite(togePieceCount) ? togePieceCount * 35 : 0;
-      const baseFinishedWeight = isGibier ? gibierMetrics.actualCompletedWeight : (unitWeight == null ? null : count * unitWeight);
-      const finishedWeight = baseFinishedWeight == null ? null : baseFinishedWeight + togeAllocatedWeight;
-      const yieldRate = isGibier ? gibierMetrics.yieldRate : (finishedWeight == null || theoreticalFinishedWeight <= 0 ? null : finishedWeight / theoreticalFinishedWeight * 100);
+      const originalCount = manufacturingCountForRecord(record);
+      const quantitiesChanged = isGibier
+        ? smokedCount !== Number(record.smokedCount || 0) || unsmokedCount !== Number(record.unsmokedCount || 0)
+        : count !== originalCount || togeAllocationEnabled !== Boolean(record.togeAllocationEnabled) || togePieceCount !== Number(record.togePieceCount || 0);
+      const storedFinishedWeight = record.actualFinishedWeightG != null ? record.actualFinishedWeightG : record.finishedWeight;
+      const storedYieldRate = record.actualYieldPercent != null ? record.actualYieldPercent : record.yieldRate;
+      const baseFinishedWeight = unitWeight == null ? null : count * unitWeight;
+      const recalculatedFinishedWeight = baseFinishedWeight == null ? null : baseFinishedWeight + togeAllocatedWeight;
+      const finishedWeight = !quantitiesChanged && storedFinishedWeight != null ? Number(storedFinishedWeight) : recalculatedFinishedWeight;
+      const yieldRate = !quantitiesChanged && storedYieldRate != null
+        ? Number(storedYieldRate)
+        : (finishedWeight == null || theoreticalFinishedWeight <= 0 ? null : finishedWeight / theoreticalFinishedWeight * 100);
       return {
         ...record,
         prepDate,
@@ -2439,6 +2500,9 @@
         togeComponentType: togeAllocationEnabled ? togeComponentType : "",
         finishedWeight,
         yieldRate,
+        savedUnitWeightG: unitWeight,
+        actualFinishedWeightG: finishedWeight,
+        actualYieldPercent: yieldRate,
         updatedAt: new Date().toISOString()
       };
     }
@@ -2502,11 +2566,9 @@
 
     function buildManufacturingRecordsCsv(records) {
       const rows = records.map((record) => {
-        const isGibier = isGibierManufacturingRecord(record);
-        const gibierMetrics = calculateGibierProductionMetrics(record.smokedCount, record.unsmokedCount, record.theoreticalFinishedWeight);
-        const completedCount = isGibier ? gibierMetrics.completedCount : record.completedCount;
-        const finishedWeight = isGibier ? gibierMetrics.actualCompletedWeight : record.finishedWeight;
-        const yieldRate = isGibier ? gibierMetrics.yieldRate : record.yieldRate;
+        const completedCount = record.completedCount;
+        const finishedWeight = record.actualFinishedWeightG != null ? record.actualFinishedWeightG : record.finishedWeight;
+        const yieldRate = record.actualYieldPercent != null ? record.actualYieldPercent : record.yieldRate;
         return [
         record.prepDate, record.date, record.category, record.recipeName || record.product, record.lot,
         csvNumber(record.meat6mm), csvNumber(record.meat3mm), csvNumber(record.meatTotal), csvNumber(record.waterAmount),
@@ -2777,7 +2839,7 @@
       const prepDate = document.getElementById("additiveFreePrepDate");
       const copyText = document.getElementById("additiveFreeCopyText");
       const buildText = () => {
-        copyText.value = buildCopyText(recipe.name, additiveFreeDisplayRows(), 4423.6, "g", prepDate.value) + "\n\n製造手順\n3mm肉と塩、スパイス、氷をカッターに投入し、乳化生地を作る。\n乳化生地に6mm肉を混ぜ込み、生地とする。\n羊腸20-22を使用\n長さ12cm";
+        copyText.value = buildCopyText(recipe.name, additiveFreeDisplayRows(), 4423.6, "g", prepDate.value, null, null, true) + "\n\n製造手順\n3mm肉と塩、スパイス、氷をカッターに投入し、乳化生地を作る。\n乳化生地に6mm肉を混ぜ込み、生地とする。\n羊腸20-22を使用\n長さ12cm";
       };
       prepDate.addEventListener("input", buildText);
       document.getElementById("additiveFreeCopy").addEventListener("click", () => copyToClipboard(copyText.value, document.getElementById("additiveFreeStatus")));
@@ -2938,7 +3000,7 @@
         if (recipe.kind === "touge") {
           copyText.value = buildTougeCopyText(recipe, displayRows, displayTotal, productionDateInput.value, splitLabel, splitMeatInfo, emulsionMode);
         } else {
-          copyText.value = buildCopyText(recipe.name, displayRows, displayTotal, "g", productionDateInput.value, splitSelect ? splitLabel : null, splitMeatInfo);
+          copyText.value = buildCopyText(recipe.name, displayRows, displayTotal, "g", productionDateInput.value, splitSelect ? splitLabel : null, splitMeatInfo, true);
         }
         latestCalculation = {
           prepDate: productionDateInput.value,
@@ -3199,8 +3261,8 @@
       }));
     }
 
-    function buildCopyText(title, rows, total, unit = "g", productionDate = todayString(), splitLabel = null, meatInfo = null) {
-      const lines = [title, `製造日：${productionDate}`];
+    function buildCopyText(title, rows, total, unit = "g", productionDate = todayString(), splitLabel = null, meatInfo = null, productionDateFirst = false) {
+      const lines = productionDateFirst ? [`製造日：${productionDate}`, title] : [title, `製造日：${productionDate}`];
       if (splitLabel) {
         lines.push(`表示：${splitLabel}`);
         if (splitLabel !== "分割なし") lines.push("※以下は1回分あたりの分量");
@@ -3219,9 +3281,8 @@
 
     function buildGibierCopyText(recipe, productionDate, rows, total) {
       const lines = [
-        "委託製造: ジビエセンター",
-        `商品名: ${recipe.productName || "鹿ソーセージ"}`,
         `製造日：${productionDate}`,
+        `商品名: ${recipe.productName || "ジビエセンター鹿ソーセージ"}`,
         "",
         "材料・計算結果"
       ];
@@ -3240,9 +3301,8 @@
 
     function buildTougeCopyText(recipe, rows, total, productionDate, splitLabel, meatInfo, emulsionMode) {
       const lines = [
-        "委託先：峠の茶屋",
-        `商品名：${recipe.productName || recipe.name}`,
         `製造日：${productionDate}`,
+        `商品名：${recipe.productName || recipe.name}`,
         `乳化生地設定：${emulsionMode}`,
         `分割表示設定：${splitLabel || "分割なし"}`
       ];
@@ -3423,9 +3483,8 @@
 
     function buildSuppliedDoughCopyText(client, productionDate, doughWeight) {
       return [
-        `委託先：${client.name}`,
-        `商品名：${client.suppliedDough.productName}`,
         `製造日：${productionDate}`,
+        `商品名：${client.suppliedDough.productName}`,
         `生地重量：${formatNumber(doughWeight)}g`,
         "",
         "製造仕様",
