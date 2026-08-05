@@ -1358,10 +1358,10 @@
     function recordOptionForSavedRecipe(savedRecipe) {
       const options = recordRecipeOptions(savedRecipe.category || "自社レシピ");
       return options.find((option) => savedRecipe.packagingKey && option.packagingKey === savedRecipe.packagingKey)
-        || options.find((option) => savedRecipe.recipeCode && recipeCodeForRecipe(option.recipe) === savedRecipe.recipeCode && (option.savedRecipeName || option.label) === (savedRecipe.savedRecipeName || savedRecipe.recipeName))
+        || options.find((option) => savedRecipe.recipeCode && recipeCodeForRecipe(option.recipe) === savedRecipe.recipeCode && (option.category === "委託製造" || (option.savedRecipeName || option.label) === (savedRecipe.savedRecipeName || savedRecipe.recipeName)))
         || options.find((option) => (option.savedRecipeName || option.label) === (savedRecipe.savedRecipeName || savedRecipe.recipeName))
         || options.find((option) => option.label === savedRecipe.recipeName)
-        || options[0];
+        || null;
     }
 
     function showManufacturingRecordFromSavedRecipe(savedRecipeId) {
@@ -1372,6 +1372,11 @@
         return;
       }
       const option = recordOptionForSavedRecipe(savedRecipe);
+      if (!option) {
+        showUnregisteredSavedRecipeList();
+        showSaveToast("選択されたレシピ情報を取得できません。前の画面に戻って選択し直してください。", "error");
+        return;
+      }
       showManufacturingRecordForm({
         recordSavedRecipeId: savedRecipeId,
         recordPrepDate: savedRecipe.prepDate || todayString(),
@@ -1389,7 +1394,6 @@
       app.innerHTML = `
         <input id="recordSavedRecipeId" type="hidden" value="${escapeHtml(draft.recordSavedRecipeId || "")}">
         <select id="recordCategory" hidden><option value="自社レシピ">自社レシピ</option><option value="委託製造">委託製造</option></select>
-        <select id="recordRecipe" hidden></select>
         <section class="section">
           <h2>基本情報</h2>
           <div class="record-primary-row">
@@ -1397,6 +1401,7 @@
               <input id="recordPrepDate" type="date" value="${todayString()}" readonly>
             </label>
             <label>レシピ名
+              <select id="recordRecipe" hidden></select>
               <div class="product-name" id="recordRecipeNameDisplay"></div>
             </label>
           </div>
@@ -1501,7 +1506,18 @@
     }
 
     function getRecordRecipeOption(optionId, category) {
-      return recordRecipeOptions(category).find((option) => option.id === optionId) || recordRecipeOptions(category)[0];
+      return recordRecipeOptions(category).find((option) => option.id === optionId) || null;
+    }
+
+    function isHerbRecordOption(option) {
+      return Boolean(option) && (option.id === "own:herbProduct" || option.id === "own:herbEvent");
+    }
+
+    function herbRecordOptionId(record) {
+      if (!record || record.category !== "自社レシピ") return "";
+      if (record.recipeId === "own:herbEvent" || record.packagingKey === "herbEvent" || record.recipeCode === "HERB-E" || String(record.recipeName || "").includes("イベント用")) return "own:herbEvent";
+      if (record.recipeId === "own:herbProduct" || record.packagingKey === "herbProduct" || record.recipeCode === "HERB-P" || record.savedRecipeName === "ハーブ" || String(record.recipeName || "").includes("ハーブ")) return "own:herbProduct";
+      return "";
     }
 
     function recordRecipeDisplayName(recipe) {
@@ -1908,6 +1924,7 @@
       const togeFields = document.getElementById("recordTogeAllocationFields");
       const togeWeightDisplay = document.getElementById("recordTogeWeightDisplay");
       const togeStatus = document.getElementById("recordTogeStatus");
+      let previousRecipeOptionId = "";
 
       const refreshRecipeOptions = () => {
         const options = recordRecipeOptions(elements.recordCategory.value);
@@ -1945,10 +1962,31 @@
 
       const render = () => {
         configureTogeControls();
+        const selectedOption = getRecordRecipeOption(elements.recordRecipe.value, elements.recordCategory.value);
+        if (!selectedOption) {
+          recipeNameDisplay.style.display = "block";
+          recipeNameDisplay.textContent = "レシピ情報を取得できません。";
+          document.getElementById("recordSave").disabled = true;
+          return;
+        }
+        document.getElementById("recordSave").disabled = false;
         const record = collectManufacturingRecord(elements);
         const isGibier = record.recipeKind === "gibier";
-        const selectedOption = getRecordRecipeOption(elements.recordRecipe.value, elements.recordCategory.value);
-        recipeNameDisplay.textContent = selectedOption.label;
+        if (isHerbRecordOption(selectedOption)) {
+          const selectedId = selectedOption.id;
+          const herbOptions = recordRecipeOptions("自社レシピ").filter(isHerbRecordOption);
+          if (elements.recordRecipe.options.length !== herbOptions.length || ![...elements.recordRecipe.options].every((item) => herbOptions.some((option) => option.id === item.value))) {
+            elements.recordRecipe.innerHTML = herbOptions.map((option) => `<option value="${option.id}">${option.label}</option>`).join("");
+            elements.recordRecipe.value = selectedId;
+          }
+          elements.recordRecipe.hidden = false;
+          recipeNameDisplay.style.display = "none";
+        } else {
+          elements.recordRecipe.hidden = true;
+          recipeNameDisplay.style.display = "block";
+          recipeNameDisplay.textContent = selectedOption ? selectedOption.label : "レシピ情報を取得できません。";
+        }
+        previousRecipeOptionId = elements.recordRecipe.value;
         packagingStandard.innerHTML = packagingStandardHtml(packagingProductIdForOption(selectedOption));
         elements.recordLot.value = record.lot;
         packageCountLabel.childNodes[0].nodeValue = `${record.packageCountLabel}\n`;
@@ -1991,9 +2029,16 @@
         render();
       });
       ids.forEach((id) => {
-        if (id !== "recordCategory") elements[id].addEventListener("input", render);
+        if (id !== "recordCategory" && id !== "recordRecipe") elements[id].addEventListener("input", render);
         if (id === "recordRecipe") elements[id].addEventListener("change", () => {
-          elements.recordSavedRecipeId.value = "";
+          const nextOption = getRecordRecipeOption(elements.recordRecipe.value, elements.recordCategory.value);
+          const hasProductionCount = Number(elements.recordPackageCount.value || 0) > 0
+            || Number(elements.recordSmokedCount.value || 0) > 0
+            || Number(elements.recordUnsmokedCount.value || 0) > 0;
+          if (hasProductionCount && isHerbRecordOption(nextOption) && !confirm("レシピを変更すると、包装基準と完成重量が再計算されます。変更しますか？")) {
+            elements.recordRecipe.value = previousRecipeOptionId;
+            return;
+          }
           render();
         });
       });
@@ -2042,6 +2087,7 @@
 
     function collectManufacturingRecord(elements) {
       const option = getRecordRecipeOption(elements.recordRecipe.value, elements.recordCategory.value);
+      if (!option) throw new Error("選択されたレシピ情報を取得できません。");
       const selectedSavedRecipeId = elements.recordSavedRecipeId ? elements.recordSavedRecipeId.value : "";
       const savedCalculation = selectedSavedRecipeId
         ? loadSavedRecipeCalculations().find((record) => savedRecipeRecordId(record) === selectedSavedRecipeId)
@@ -2073,6 +2119,7 @@
         date: elements.recordDate.value,
         category: option.category,
         recipeId: option.id,
+        productId: packagingProductIdForOption(option),
         recipeName: option.label,
         savedRecipeName: option.savedRecipeName || option.label,
         recipeCode: option.packagingKey === "herbProduct" ? "HERB-P" : option.packagingKey === "herbEvent" ? "HERB-E" : recipeCodeForRecipe(option.recipe),
@@ -2319,6 +2366,7 @@
 
     function manufacturingRecordEditHtml(record) {
       const isGibier = isGibierManufacturingRecord(record);
+      const herbOptionId = herbRecordOptionId(record);
       const togeComponentType = togeComponentTypeForRecord(record);
       const allocationOptions = togeComponentType ? availableTogeAllocations(togeComponentType, manufacturingRecordId(record)) : [];
       const currentAllocationId = record.togeAllocationId || "";
@@ -2328,7 +2376,12 @@
             <input id="editRecordPrepDate" type="date" value="${escapeHtml(record.prepDate || todayString())}" readonly>
           </label>
           <label>レシピ名
-            <div class="product-name">${escapeHtml(record.recipeName || "")}</div>
+            ${herbOptionId ? `
+              <select id="editRecordRecipe">
+                <option value="own:herbProduct" ${herbOptionId === "own:herbProduct" ? "selected" : ""}>ハーブ（製品用）</option>
+                <option value="own:herbEvent" ${herbOptionId === "own:herbEvent" ? "selected" : ""}>ハーブ（イベント用）</option>
+              </select>
+            ` : `<div class="product-name">${escapeHtml(record.recipeName || "")}</div>`}
           </label>
         </div>
         <div class="field-row">
@@ -2348,8 +2401,8 @@
           <label>燻製なし本数（本）
             <input id="editRecordUnsmokedCount" type="number" inputmode="numeric" min="0" step="1" value="${escapeHtml(record.unsmokedCount || "0")}">
           </label>
-          ` : `<label>${escapeHtml(record.packageCountLabel || "包装数")}
-            <input id="editRecordPackageCount" type="number" inputmode="numeric" min="0" step="1" value="${escapeHtml(record.packageCount || "0")}">
+          ` : `<label id="editRecordPackageCountLabel">${escapeHtml(record.packageCountLabel || "包装数")}
+            <input id="editRecordPackageCount" type="number" inputmode="numeric" min="0" step="1" value="${escapeHtml((record.packagingUnit === "本" ? record.completedCount : record.packageCount) || "0")}">
           </label>`}
           <label>ロス本数（本）
             <input id="editRecordLossCount" type="number" inputmode="numeric" min="0" step="1" value="${escapeHtml(record.lossCount || "0")}">
@@ -2388,7 +2441,9 @@
     function bindManufacturingRecordEdit(record) {
       const prepDate = document.getElementById("editRecordPrepDate");
       const date = document.getElementById("editRecordDate");
+      const recipeSelect = document.getElementById("editRecordRecipe");
       const packageCount = document.getElementById("editRecordPackageCount");
+      const packageCountLabel = document.getElementById("editRecordPackageCountLabel");
       const smokedCount = document.getElementById("editRecordSmokedCount");
       const unsmokedCount = document.getElementById("editRecordUnsmokedCount");
       const lossCount = document.getElementById("editRecordLossCount");
@@ -2400,6 +2455,31 @@
       const togeGeneratedId = document.getElementById("editRecordTogeGeneratedId");
       const togePieceCount = document.getElementById("editRecordTogePieceCount");
       const preview = document.getElementById("recordEditPreview");
+      let previousEditRecipeOptionId = recipeSelect ? recipeSelect.value : "";
+      const editBaseRecord = () => {
+        if (!recipeSelect || recipeSelect.value === herbRecordOptionId(record)) return record;
+        const option = getRecordRecipeOption(recipeSelect.value, "自社レシピ");
+        const packagingSpec = packagingSpecForRecordOption(option);
+        if (!option || !packagingSpec) return record;
+        return {
+          ...record,
+          recipeId: option.id,
+          productId: packagingProductIdForOption(option),
+          recipeName: option.label,
+          savedRecipeName: option.savedRecipeName,
+          recipeCode: option.packagingKey === "herbEvent" ? "HERB-E" : "HERB-P",
+          packagingKey: option.packagingKey,
+          packagingUnit: packagingSpec.unit,
+          packageCountLabel: packagingSpec.unit === "本" ? "完成本数" : "包装数",
+          unitWeightLabel: packagingSpec.unit === "本" ? "1本重量" : "1袋重量",
+          unitPiecesLabel: packagingSpec.unit === "本" ? "" : "1袋本数",
+          packWeight: packagingSpec.unitWeight,
+          packPieces: packagingSpec.unitPieces,
+          unitWeight: packagingSpec.unitWeight,
+          unitPieces: packagingSpec.unitPieces,
+          savedUnitWeightG: packagingSpec.unitWeight
+        };
+      };
       const allocationValues = () => ({
         enabled: Boolean(togeEnabled && togeEnabled.checked),
         id: togeId ? (togeId.value === "__new__" ? togeGeneratedId.value : togeId.value) : "",
@@ -2408,12 +2488,29 @@
       const renderPreview = () => {
         if (togeFields) togeFields.style.display = togeEnabled.checked ? "grid" : "none";
         const allocation = allocationValues();
-        const updated = recalculateManufacturingRecord(record, prepDate.value, date.value, packageCount ? packageCount.value : "", lossCount.value, leftoverWeight.value, memo.value, smokedCount ? smokedCount.value : "0", unsmokedCount ? unsmokedCount.value : "0", allocation.enabled, allocation.id, allocation.pieceCount);
+        const baseRecord = editBaseRecord();
+        if (packageCountLabel) packageCountLabel.childNodes[0].nodeValue = `${baseRecord.packageCountLabel || "包装数"}\n`;
+        const updated = recalculateManufacturingRecord(baseRecord, prepDate.value, date.value, packageCount ? packageCount.value : "", lossCount.value, leftoverWeight.value, memo.value, smokedCount ? smokedCount.value : "0", unsmokedCount ? unsmokedCount.value : "0", allocation.enabled, allocation.id, allocation.pieceCount);
         preview.innerHTML = manufacturingRecordReadHtml(updated, true);
         document.getElementById("recordDetailText").value = buildManufacturingRecordText(updated);
       };
       [prepDate, date, packageCount, smokedCount, unsmokedCount, lossCount, leftoverWeight, memo, togeEnabled, togeId, togePieceCount].filter(Boolean).forEach((element) => element.addEventListener("input", renderPreview));
       [togeEnabled, togeId].filter(Boolean).forEach((element) => element.addEventListener("change", renderPreview));
+      if (recipeSelect) recipeSelect.addEventListener("change", () => {
+        const selectedOption = getRecordRecipeOption(recipeSelect.value, "自社レシピ");
+        if (!selectedOption || !packagingSpecForRecordOption(selectedOption)) {
+          recipeSelect.value = previousEditRecipeOptionId;
+          showSaveToast("選択されたレシピ情報を取得できません。前の画面に戻って選択し直してください。", "error");
+          return;
+        }
+        const hasProductionCount = Number(packageCount ? packageCount.value : 0) > 0;
+        if (hasProductionCount && !confirm("レシピを変更すると、包装基準と完成重量が再計算されます。変更しますか？")) {
+          recipeSelect.value = previousEditRecipeOptionId;
+          return;
+        }
+        previousEditRecipeOptionId = recipeSelect.value;
+        renderPreview();
+      });
       document.getElementById("recordEditCancel").addEventListener("click", () => showManufacturingRecordDetail(manufacturingRecordId(record)));
       const editSaveButton = document.getElementById("recordEditSave");
       let isSavingRecordEdit = false;
@@ -2427,7 +2524,7 @@
         editSaveButton.disabled = true;
         try {
           const allocation = allocationValues();
-          const updated = recalculateManufacturingRecord(record, prepDate.value, date.value, packageCount ? packageCount.value : "", lossCount.value, leftoverWeight.value, memo.value, smokedCount ? smokedCount.value : "0", unsmokedCount ? unsmokedCount.value : "0", allocation.enabled, allocation.id, allocation.pieceCount);
+          const updated = recalculateManufacturingRecord(editBaseRecord(), prepDate.value, date.value, packageCount ? packageCount.value : "", lossCount.value, leftoverWeight.value, memo.value, smokedCount ? smokedCount.value : "0", unsmokedCount ? unsmokedCount.value : "0", allocation.enabled, allocation.id, allocation.pieceCount);
           const quantityChanged = manufacturingCountForRecord(updated) !== manufacturingCountForRecord(record)
             || Number(updated.togePieceCount || 0) !== Number(record.togePieceCount || 0)
             || Boolean(updated.togeAllocationEnabled) !== Boolean(record.togeAllocationEnabled);
