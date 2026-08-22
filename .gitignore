@@ -1,0 +1,1 @@
+supabase/supabase-config.js

@@ -545,6 +545,12 @@
     <main id="app"></main>
   </div>
 
+  <script src="supabase/supabase-config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase/auth.js"></script>
+  <script src="supabase/master-data.js"></script>
+  <script src="supabase/offline-sync.js"></script>
+  <script src="supabase/app-sync-adapter.js"></script>
   <script>
     /*
       開発用メモ: 肉重量1000g時の期待値
@@ -568,7 +574,7 @@
     const OLD_MANUFACTURING_RECORDS_KEY = "meatRecipeApp.manufacturingRecords.v1";
     const OLD_SAVED_RECIPE_CALCULATIONS_KEY = "meatRecipeApp.savedRecipeCalculations.v1";
     const PACKAGING_MASTER_KEY = "packagingMaster.v1";
-    const MANUFACTURING_RECORD_CSV_HEADERS = ["仕込み日", "製造日", "製造区分", "レシピ名", "ロット番号", "6mm肉重量", "3mm肉重量", "肉重量合計", "水", "乳化生地重量", "合計重量", "包装単位", "包装数", "完成本数", "燻製本数", "燻製なし本数", "ロス本数", "余り重量", "完成重量", "歩留まり率", "メモ"];
+    const MANUFACTURING_RECORD_CSV_HEADERS = ["仕込み日", "製造日", "製造区分", "レシピ名", "ロット番号", "6mm肉重量", "3mm肉重量", "肉重量合計", "水", "乳化生地重量", "合計重量", "包装単位", "包装数", "完成本数", "燻製本数", "燻製なし本数", "ロス本数", "余り重量", "完成重量", "歩留まり率", "メモ", "製品用包装数", "イベント用本数", "峠の茶屋用本数", "峠の茶屋用重量"];
     const SCREEN_STATE_KEY = "meatRecipeApp.screenState.v1";
     let currentScreenState = null;
 
@@ -821,13 +827,14 @@
       );
     }
 
-    function calculateGibierProductionMetrics(smokedValue, unsmokedValue, theoreticalValue) {
+    function calculateGibierProductionMetrics(smokedValue, unsmokedValue, theoreticalValue, unitWeightValue = 70) {
       const smokedCount = Math.max(Math.trunc(Number(smokedValue) || 0), 0);
       const unsmokedCount = Math.max(Math.trunc(Number(unsmokedValue) || 0), 0);
       const completedCount = smokedCount + unsmokedCount;
-      const actualCompletedWeight = completedCount * 70;
+      const unitWeight = Number(unitWeightValue);
+      const actualCompletedWeight = Number.isFinite(unitWeight) && unitWeight > 0 ? completedCount * unitWeight : null;
       const theoreticalWeight = Number(theoreticalValue) || 0;
-      const yieldRate = theoreticalWeight > 0 ? actualCompletedWeight / theoreticalWeight * 100 : null;
+      const yieldRate = actualCompletedWeight != null && theoreticalWeight > 0 ? actualCompletedWeight / theoreticalWeight * 100 : null;
       return { smokedCount, unsmokedCount, completedCount, actualCompletedWeight, yieldRate };
     }
 
@@ -864,7 +871,7 @@
     }
 
     function recordFormDraftValues() {
-      const ids = ["recordSavedRecipeId", "recordPrepDate", "recordDate", "recordCategory", "recordRecipe", "recordLot", "recordMemo", "recordPackageCount", "recordSmokedCount", "recordUnsmokedCount", "recordLossCount", "recordLeftoverWeight", "recordTogeAllocationEnabled", "recordTogeAllocationId", "recordTogeGeneratedId", "recordTogePieceCount"];
+      const ids = ["recordSavedRecipeId", "recordPrepDate", "recordDate", "recordCategory", "recordRecipe", "recordLot", "recordMemo", "recordPackageCount", "recordHerbStandardPackageCount", "recordHerbEventPieceCount", "recordSmokedCount", "recordUnsmokedCount", "recordLossCount", "recordLeftoverWeight", "recordTogeAllocationEnabled", "recordTogeAllocationId", "recordTogeGeneratedId", "recordTogePieceCount"];
       const values = {};
       ids.forEach((id) => {
         const element = document.getElementById(id);
@@ -913,13 +920,281 @@
       if (state.screen === "recordHistory") showManufacturingRecordHistory();
     }
 
-    function initApp() {
+    let manufacturingSyncInitialization = null;
+
+    function initializeManufacturingSync() {
+      if (!window.MeatProductionSync) return Promise.reject(new Error("端末保存機能を読み込めません。"));
+      if (!manufacturingSyncInitialization) {
+        manufacturingSyncInitialization = window.MeatProductionSync.initialize(window.MEAT_SUPABASE_CONFIG || {});
+      }
+      return manufacturingSyncInitialization;
+    }
+
+    let masterDataInitialization = null;
+
+    const SUPABASE_PRODUCT_TO_LEGACY_ID = Object.freeze({
+      ARABIKI: "PROD_ARABIKI",
+      ADDITIVE_FREE_ARABIKI: "PROD_ADDITIVE_FREE_ARABIKI",
+      HERB: "PROD_HERB",
+      CHEESE: "PROD_CHEESE",
+      CHORIZO: "PROD_CHORIZO",
+      YAMAGOYA: "PROD_YAMAGOYA",
+      GIBIER_CENTER: "PROD_GIBIER_CENTER",
+      TOUGE: "PROD_TOGE_CHAya",
+      ZANZATEI: "PROD_ZANZATEI"
+    });
+
+    function legacyPackagingName(internalCode) {
+      return internalCode === "HERB_EVENT" ? "イベント" : "通常";
+    }
+
+    function applySupabaseMasterData(data) {
+      if (!data || !Array.isArray(data.packagingMasters) || !Array.isArray(data.packagingVersions)) return false;
+      const productById = new Map((data.products || []).map((product) => [product.id, product]));
+      const currentVersionByMasterId = new Map(data.packagingVersions.map((version) => [version.packaging_master_id, version]));
+      const now = new Date().toISOString();
+      const records = data.packagingMasters.map((master, index) => {
+        const product = productById.get(master.product_id);
+        const version = currentVersionByMasterId.get(master.id);
+        const productId = product ? SUPABASE_PRODUCT_TO_LEGACY_ID[product.internal_code] : "";
+        if (!productId || !version) return null;
+        const unitWeightG = Number(version.unit_weight_g);
+        const packageWeightG = version.package_weight_g == null ? null : Number(version.package_weight_g);
+        const fixedPieces = version.units_per_package == null ? null : Number(version.units_per_package);
+        const minPieces = version.min_units_per_package == null ? null : Number(version.min_units_per_package);
+        const maxPieces = version.max_units_per_package == null ? null : Number(version.max_units_per_package);
+        return {
+          packagingId: master.id,
+          packagingVersionId: version.id,
+          packagingInternalCode: master.internal_code,
+          productId,
+          supabaseProductId: master.product_id,
+          packagingName: legacyPackagingName(master.internal_code),
+          quantityPerPackage: fixedPieces != null ? fixedPieces : minPieces,
+          minQuantityPerPackage: minPieces,
+          maxQuantityPerPackage: maxPieces,
+          netWeightG: packageWeightG,
+          unitWeightG,
+          packageUnit: version.unit_type === "piece" ? "本" : "パック",
+          displayOrder: index + 1,
+          isActive: master.is_active !== false,
+          isSupabaseMaster: true,
+          versionNo: Number(version.version_no),
+          createdAt: master.created_at || now,
+          updatedAt: master.updated_at || now
+        };
+      }).filter(Boolean);
+      if (records.length !== data.packagingMasters.length) {
+        throw new Error("Supabase包装マスタのUUID関連付けを解決できませんでした。");
+      }
+      localStorage.setItem(PACKAGING_MASTER_KEY, JSON.stringify(records));
+      return true;
+    }
+
+    function initializeSupabaseMasterData() {
+      if (!window.MeatProductionMasterData) return Promise.resolve({ success: false, source: "local" });
+      if (!masterDataInitialization) {
+        masterDataInitialization = window.MeatProductionMasterData
+          .initialize(window.MEAT_SUPABASE_CONFIG || {})
+          .then((result) => {
+            if (result && result.data) applySupabaseMasterData(result.data);
+            return result;
+          })
+          .catch((error) => {
+            console.error("[Supabaseマスタ] アプリへの反映に失敗しました。既存ローカルマスタを使用します。", error);
+            return { success: false, source: "local", error };
+          });
+      }
+      return masterDataInitialization;
+    }
+
+    async function saveManufacturingRecordOfflineFirst(record) {
+      await initializeManufacturingSync();
+      const bundle = window.MeatProductionSyncAdapter.fromLegacy(
+        record,
+        window.MEAT_SUPABASE_CONFIG || {},
+        window.MeatProductionSync
+      );
+      Object.assign(record, bundle.legacyRecordPatch);
+      const result = await window.MeatProductionSync.saveAndSync(bundle.record, bundle.allocations);
+      record.syncStatus = result.synced ? "synced" : "error";
+      record.syncError = result.error || "";
+      return result;
+    }
+
+    async function retryManufacturingSync(showMessage = true) {
+      try {
+        await initializeManufacturingSync();
+        await window.MeatProductionSync.syncPending();
+        const count = await window.MeatProductionSync.pendingCount();
+        refreshManufacturingSyncStatus(count);
+        if (showMessage) showSaveToast(count ? `未同期の製造記録が${count}件あります。` : "同期しました。");
+      } catch (error) {
+        if (showMessage) showSaveToast("同期できませんでした。端末には保存されています。", "error");
+      }
+    }
+
+    function refreshManufacturingSyncStatus(count) {
+      const status = document.getElementById("manufacturingSyncStatus");
+      if (status) status.textContent = count ? `未同期：${count}件` : "未同期：0件";
+    }
+
+    const manufacturingIndexedHistory = new Map();
+
+    function cachedBundleToManufacturingRecord(bundle) {
+      const cloud = bundle.record || {};
+      const allocations = bundle.allocations || [];
+      const legacy = cloud.legacy_payload && typeof cloud.legacy_payload === "object" ? cloud.legacy_payload : {};
+      const allocation = (type) => allocations.find((item) => item.allocation_type === type);
+      const standard = allocation("STANDARD");
+      const herbStandard = allocation("HERB_STANDARD");
+      const herbEvent = allocation("HERB_EVENT");
+      const gibierSmoked = allocation("GIBIER_SMOKED");
+      const gibierUnsmoked = allocation("GIBIER_UNSMOKED");
+      const loss = allocation("LOSS");
+      const toge = allocation("TOUGE");
+      const productName = cloud.product && cloud.product.display_name ? cloud.product.display_name : "";
+      const recipeName = cloud.recipe && cloud.recipe.display_name ? cloud.recipe.display_name : productName;
+      const packagingUnit = legacy.packagingUnit || (standard && standard.quantity_unit === "piece" ? "本" : "袋");
+      return {
+        ...legacy,
+        id: cloud.id,
+        manufacturingRecordId: cloud.id,
+        cloudRecordId: cloud.id,
+        prepDate: cloud.prep_date || legacy.prepDate || "",
+        date: cloud.manufacturing_date || legacy.date || "",
+        lot: cloud.lot_number || legacy.lot || "",
+        category: legacy.category || (cloud.manufacturing_type === "own" ? "自社レシピ" : "委託製造"),
+        recipeName: legacy.recipeName || recipeName || "レシピ未設定",
+        product: legacy.product || productName || recipeName,
+        theoreticalFinishedWeight: Number(cloud.theoretical_weight_g != null ? cloud.theoretical_weight_g : legacy.theoreticalFinishedWeight || 0),
+        finishedWeight: Number(cloud.completed_weight_g != null ? cloud.completed_weight_g : legacy.finishedWeight || 0),
+        actualFinishedWeightG: Number(cloud.completed_weight_g != null ? cloud.completed_weight_g : legacy.actualFinishedWeightG || 0),
+        yieldRate: cloud.yield_rate == null ? legacy.yieldRate : Number(cloud.yield_rate),
+        actualYieldPercent: cloud.yield_rate == null ? legacy.actualYieldPercent : Number(cloud.yield_rate),
+        leftoverWeight: cloud.remainder_weight_g != null ? String(cloud.remainder_weight_g) : (legacy.leftoverWeight || "0"),
+        memo: cloud.memo != null ? cloud.memo : (legacy.memo || ""),
+        packagingUnit,
+        packageCount: legacy.packageCount != null ? legacy.packageCount : (standard && standard.quantity_unit === "package" ? String(standard.quantity) : ""),
+        completedCount: legacy.completedCount != null ? legacy.completedCount : (standard && standard.quantity_unit === "piece" ? String(standard.quantity) : String(Number(gibierSmoked && gibierSmoked.quantity || 0) + Number(gibierUnsmoked && gibierUnsmoked.quantity || 0))),
+        herbStandardPackageCount: legacy.herbStandardPackageCount != null ? legacy.herbStandardPackageCount : Number(herbStandard && herbStandard.quantity || 0),
+        herbEventPieceCount: legacy.herbEventPieceCount != null ? legacy.herbEventPieceCount : Number(herbEvent && herbEvent.quantity || 0),
+        smokedCount: legacy.smokedCount != null ? legacy.smokedCount : Number(gibierSmoked && gibierSmoked.quantity || 0),
+        unsmokedCount: legacy.unsmokedCount != null ? legacy.unsmokedCount : Number(gibierUnsmoked && gibierUnsmoked.quantity || 0),
+        lossCount: legacy.lossCount != null ? legacy.lossCount : Number(loss && loss.quantity || 0),
+        togeAllocationEnabled: legacy.togeAllocationEnabled != null ? legacy.togeAllocationEnabled : Boolean(toge),
+        togeAllocationId: legacy.togeAllocationId || (toge && toge.allocation_code) || "",
+        togePieceCount: legacy.togePieceCount != null ? legacy.togePieceCount : Number(toge && toge.quantity || 0),
+        togeAllocatedWeight: legacy.togeAllocatedWeight != null ? legacy.togeAllocatedWeight : Number(toge && toge.calculated_weight_g || 0),
+        status: cloud.status || legacy.status || "active",
+        syncStatus: cloud.sync_status || "synced",
+        updatedAt: cloud.updated_at || legacy.updatedAt || ""
+      };
+    }
+
+    async function loadIndexedManufacturingHistory() {
+      await initializeManufacturingSync();
+      const bundles = await window.MeatProductionSync.getLocalHistory();
+      manufacturingIndexedHistory.clear();
+      bundles.forEach((bundle) => {
+        const record = cachedBundleToManufacturingRecord(bundle);
+        if (record.status !== "deleted") manufacturingIndexedHistory.set(manufacturingRecordId(record), record);
+      });
+      return Array.from(manufacturingIndexedHistory.values());
+    }
+
+    function combinedManufacturingHistory(indexedRecords = []) {
+      const records = new Map(indexedRecords.map((record) => [manufacturingRecordId(record), record]));
+      loadManufacturingRecords().forEach((record) => {
+        const id = manufacturingRecordId(record);
+        const cached = records.get(id);
+        if (!cached || cached.syncStatus === "pending" || cached.syncStatus === "error") records.set(id, cached || record);
+      });
+      return Array.from(records.values()).filter((record) => record.status !== "deleted").sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+    }
+
+    let applicationStarted = false;
+
+    function startApplication() {
+      if (applicationStarted) return;
+      applicationStarted = true;
+      initializeManufacturingSync().then((result) => refreshManufacturingSyncStatus(result.pendingCount)).catch(() => {});
+      initializeSupabaseMasterData();
       const state = loadScreenState();
       if (state) {
         showRestorePrompt(state);
         return;
       }
       showHome();
+    }
+
+    function showSupabaseLogin() {
+      setHeader("ログイン", "Supabaseへ接続します", false);
+      app.innerHTML = `
+        <section class="section">
+          <h2>食肉加工アプリ ログイン</h2>
+          <p class="note">登録済みのメールアドレスとパスワードを入力してください。</p>
+          <form id="supabaseLoginForm">
+            <div class="field-row">
+              <label>メールアドレス
+                <input id="supabaseLoginEmail" type="email" inputmode="email" autocomplete="username" required>
+              </label>
+              <label>パスワード
+                <input id="supabaseLoginPassword" type="password" autocomplete="current-password" required>
+              </label>
+            </div>
+            <button id="supabaseLoginButton" class="primary" type="submit">ログイン</button>
+            <p id="supabaseLoginStatus" class="status" role="alert" aria-live="polite"></p>
+          </form>
+        </section>
+      `;
+      const form = document.getElementById("supabaseLoginForm");
+      const email = document.getElementById("supabaseLoginEmail");
+      const password = document.getElementById("supabaseLoginPassword");
+      const button = document.getElementById("supabaseLoginButton");
+      const status = document.getElementById("supabaseLoginStatus");
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        status.textContent = "";
+        status.classList.remove("error");
+        button.disabled = true;
+        button.textContent = "ログイン中…";
+        try {
+          await window.MeatProductionAuth.signInWithPassword(email.value.trim(), password.value);
+          password.value = "";
+          startApplication();
+        } catch (error) {
+          console.error("[Supabase Auth] ログイン失敗", error);
+          status.textContent = "ログインできませんでした。メールアドレスまたはパスワードを確認してください。";
+          status.classList.add("error");
+        } finally {
+          button.disabled = false;
+          button.textContent = "ログイン";
+        }
+      });
+      email.focus();
+    }
+
+    async function initApp() {
+      const config = window.MEAT_SUPABASE_CONFIG || {};
+      if (!window.MeatProductionAuth || config.enabled === false || !config.url || !config.publishableKey) {
+        startApplication();
+        return;
+      }
+      try {
+        const authState = await window.MeatProductionAuth.initialize(config);
+        if (authState.session && authState.session.access_token) {
+          startApplication();
+          return;
+        }
+        if (navigator.onLine) {
+          showSupabaseLogin();
+          return;
+        }
+      } catch (error) {
+        console.warn("[Supabase Auth] セッション確認に失敗したため、ローカルデータで起動します。", error);
+      }
+      startApplication();
     }
 
     function createButton(item) {
@@ -1037,8 +1312,14 @@
               </button>
             `).join("")}
           </div>
+          <div class="record-actions" style="margin-top: 12px;">
+            <span id="manufacturingSyncStatus" class="status">未同期：確認中</span>
+            <button id="manufacturingSyncRetry" class="secondary" type="button">同期を再試行</button>
+          </div>
         </section>
       `;
+      document.getElementById("manufacturingSyncRetry").addEventListener("click", () => retryManufacturingSync(true));
+      initializeManufacturingSync().then(() => window.MeatProductionSync.pendingCount()).then(refreshManufacturingSyncStatus).catch(() => {});
     }
 
     const PRODUCT_MASTER = [
@@ -1087,14 +1368,21 @@
       const initialRecord = initialPackagingMasterRecords().find((item) => item.productId === productId && item.packagingName === packagingName);
       return {
         packagingId: record.packagingId || initialPackagingId(productId, packagingName) || record.id || `PACK_CUSTOM_${Date.now()}_${index}`,
+        packagingVersionId: record.packagingVersionId || "",
+        packagingInternalCode: record.packagingInternalCode || "",
         productId,
+        supabaseProductId: record.supabaseProductId || "",
         packagingName,
         quantityPerPackage: Number(record.quantityPerPackage != null ? record.quantityPerPackage : record.pieceCount),
-        netWeightG: Number(record.netWeightG != null ? record.netWeightG : record.contentWeight),
+        minQuantityPerPackage: record.minQuantityPerPackage == null ? null : Number(record.minQuantityPerPackage),
+        maxQuantityPerPackage: record.maxQuantityPerPackage == null ? null : Number(record.maxQuantityPerPackage),
+        netWeightG: record.netWeightG == null && record.contentWeight == null ? null : Number(record.netWeightG != null ? record.netWeightG : record.contentWeight),
         unitWeightG: Number(record.unitWeightG != null ? record.unitWeightG : record.unitWeight),
         packageUnit: record.packageUnit || record.packagingUnit || "パック",
         displayOrder: Number.isInteger(Number(record.displayOrder)) ? Number(record.displayOrder) : (initialRecord ? initialRecord.displayOrder : index + 1),
         isActive: record.isActive !== false,
+        isSupabaseMaster: record.isSupabaseMaster === true,
+        versionNo: record.versionNo == null ? null : Number(record.versionNo),
         createdAt: record.createdAt || new Date().toISOString(),
         updatedAt: record.updatedAt || new Date().toISOString()
       };
@@ -1129,6 +1417,7 @@
 
     function packagingProductIdForOption(option) {
       if (!option) return "";
+      if (option.productId) return option.productId;
       if (option.category === "自社レシピ") return productIdForName(option.savedRecipeName || option.label);
       if (option.recipe.kind === "gibier") return "PROD_GIBIER_CENTER";
       if (option.recipe.kind === "yamanoya") return "PROD_YAMAGOYA";
@@ -1136,6 +1425,7 @@
     }
 
     function packagingProductIdForRecord(record) {
+      if (record.productId) return record.productId;
       if (record.category === "自社レシピ") return productIdForName(record.savedRecipeName || String(record.recipeName || "").replace(/（.*$/, ""));
       if (isGibierManufacturingRecord(record)) return "PROD_GIBIER_CENTER";
       if (String(record.recipeName || "").includes("山小屋")) return "PROD_YAMAGOYA";
@@ -1157,10 +1447,17 @@
       return records.map((packaging) => {
         const unitWeight = Number(packaging.unitWeightG || 0);
         const unitText = `${Number.isInteger(unitWeight) ? "" : "約"}${formatPackagingNumber(unitWeight)}g／本`;
+        const hasRange = Number(packaging.minQuantityPerPackage) > 0 && Number(packaging.maxQuantityPerPackage) >= Number(packaging.minQuantityPerPackage);
+        const piecesText = hasRange
+          ? `${formatPackagingNumber(packaging.minQuantityPerPackage)}～${formatPackagingNumber(packaging.maxQuantityPerPackage)}本`
+          : `${formatPackagingNumber(packaging.quantityPerPackage)}本`;
+        const packageWeightText = Number(packaging.netWeightG) > 0
+          ? `${piecesText}／${formatPackagingNumber(packaging.netWeightG)}g`
+          : `${piecesText}／固定包装重量なし`;
         return `
           <div class="packaging-standard">
             <strong>包装基準：${escapeHtml(packaging.packagingName)}</strong>
-            <div>${formatPackagingNumber(packaging.quantityPerPackage)}本／${formatPackagingNumber(packaging.netWeightG)}g</div>
+            <div>${packageWeightText}</div>
             <div>${unitText}</div>
             <div>包装単位：${escapeHtml(packaging.packageUnit)}</div>
           </div>
@@ -1183,7 +1480,7 @@
               ${records.map((record) => `
                 <div class="record-summary">
                   <strong>${escapeHtml(productNameForId(record.productId))} / ${escapeHtml(record.packagingName)}</strong>
-                  <div>${formatPackagingNumber(record.quantityPerPackage)}本／${formatPackagingNumber(record.netWeightG)}g</div>
+                  <div>${Number(record.minQuantityPerPackage) > 0 && Number(record.maxQuantityPerPackage) >= Number(record.minQuantityPerPackage) ? `${formatPackagingNumber(record.minQuantityPerPackage)}～${formatPackagingNumber(record.maxQuantityPerPackage)}本／固定包装重量なし` : `${formatPackagingNumber(record.quantityPerPackage)}本／${formatPackagingNumber(record.netWeightG)}g`}</div>
                   <div>${formatPackagingNumber(record.unitWeightG)}g／本・${escapeHtml(record.packageUnit)}</div>
                   <div>表示順：${record.displayOrder} / ${record.isActive ? "使用中" : "停止中"}</div>
                   <div class="note">包装ID：${escapeHtml(record.packagingId)} / 商品ID：${escapeHtml(record.productId)}</div>
@@ -1357,6 +1654,10 @@
 
     function recordOptionForSavedRecipe(savedRecipe) {
       const options = recordRecipeOptions(savedRecipe.category || "自社レシピ");
+      const savedName = savedRecipe.savedRecipeName || savedRecipe.recipeName || "";
+      if (savedRecipe.category === "自社レシピ" && String(savedName).includes("ハーブ")) {
+        return options.find((option) => option.id === "own:herb") || null;
+      }
       return options.find((option) => savedRecipe.packagingKey && option.packagingKey === savedRecipe.packagingKey)
         || options.find((option) => savedRecipe.recipeCode && recipeCodeForRecipe(option.recipe) === savedRecipe.recipeCode && (option.category === "委託製造" || (option.savedRecipeName || option.label) === (savedRecipe.savedRecipeName || savedRecipe.recipeName)))
         || options.find((option) => (option.savedRecipeName || option.label) === (savedRecipe.savedRecipeName || savedRecipe.recipeName))
@@ -1426,6 +1727,18 @@
             <label id="recordPackageCountLabel">包装数
               <input id="recordPackageCount" type="number" inputmode="numeric" min="0" step="1" value="0">
             </label>
+            <div id="recordHerbCounts" style="display:none">
+              <div class="product-name">製品用</div>
+              <label>包装数（パック）
+                <input id="recordHerbStandardPackageCount" type="number" inputmode="numeric" min="0" step="1" value="0">
+              </label>
+              <div class="note" id="recordHerbStandardBasis"></div>
+              <div class="product-name">イベント用</div>
+              <label>本数（本）
+                <input id="recordHerbEventPieceCount" type="number" inputmode="numeric" min="0" step="1" value="0">
+              </label>
+              <div class="note" id="recordHerbEventBasis"></div>
+            </div>
             <label>ロス本数（本）
               <input id="recordLossCount" type="number" inputmode="numeric" min="0" step="1" value="0">
             </label>
@@ -1480,17 +1793,19 @@
 
     function recordRecipeOptions(category = "自社レシピ") {
       const own = [
-        { id: "own:arabiki", category: "自社レシピ", label: "あらびき", savedRecipeName: "あらびき", packagingKey: "arabiki", recipe: ownRecipes.arabiki },
-        { id: "own:additiveFreeArabiki", category: "自社レシピ", label: "無添加あらびき", savedRecipeName: "無添加あらびき", packagingKey: "", recipe: ownRecipes.additiveFreeArabiki },
-        { id: "own:cheese", category: "自社レシピ", label: "チーズ", savedRecipeName: "チーズ", packagingKey: "cheese", recipe: ownRecipes.cheese },
-        { id: "own:herbProduct", category: "自社レシピ", label: "ハーブ（製品用）", savedRecipeName: "ハーブ", packagingKey: "herbProduct", recipe: ownRecipes.herb },
-        { id: "own:herbEvent", category: "自社レシピ", label: "ハーブ（イベント用）", savedRecipeName: "ハーブ", packagingKey: "herbEvent", recipe: ownRecipes.herb },
-        { id: "own:chorizo", category: "自社レシピ", label: "チョリソー", savedRecipeName: "チョリソー", packagingKey: "chorizo", recipe: ownRecipes.chorizo }
+        { id: "own:arabiki", productId: "PROD_ARABIKI", category: "自社レシピ", label: "あらびき", savedRecipeName: "あらびき", packagingKey: "arabiki", recipe: ownRecipes.arabiki },
+        { id: "own:additiveFreeArabiki", productId: ADDITIVE_FREE_PRODUCT_ID, category: "自社レシピ", label: "無添加あらびき", savedRecipeName: "無添加あらびき", packagingKey: "", recipe: ownRecipes.additiveFreeArabiki },
+        { id: "own:cheese", productId: "PROD_CHEESE", category: "自社レシピ", label: "チーズ", savedRecipeName: "チーズ", packagingKey: "cheese", recipe: ownRecipes.cheese },
+        { id: "own:herb", productId: "PROD_HERB", category: "自社レシピ", label: "ハーブ", savedRecipeName: "ハーブ", packagingKey: "", recipe: ownRecipes.herb },
+        { id: "own:herbProduct", productId: "PROD_HERB", category: "自社レシピ", label: "ハーブ（製品用）", savedRecipeName: "ハーブ", packagingKey: "herbProduct", recipe: ownRecipes.herb },
+        { id: "own:herbEvent", productId: "PROD_HERB", category: "自社レシピ", label: "ハーブ（イベント用）", savedRecipeName: "ハーブ", packagingKey: "herbEvent", recipe: ownRecipes.herb },
+        { id: "own:chorizo", productId: "PROD_CHORIZO", category: "自社レシピ", label: "チョリソー", savedRecipeName: "チョリソー", packagingKey: "chorizo", recipe: ownRecipes.chorizo }
       ];
       const clientOptions = [];
       const yamanoya = outsourceClients.yamanoya;
       clientOptions.push({
         id: "client:yamanoya",
+        productId: "PROD_YAMAGOYA",
         category: "委託製造",
         label: recordRecipeDisplayName(yamanoya.recipe),
         recipe: yamanoya.recipe
@@ -1498,6 +1813,7 @@
       const gibier = outsourceClients.gibier;
       clientOptions.push({
         id: "client:gibier",
+        productId: "PROD_GIBIER_CENTER",
         category: "委託製造",
         label: recordRecipeDisplayName(gibier.recipe),
         recipe: gibier.recipe
@@ -1510,7 +1826,15 @@
     }
 
     function isHerbRecordOption(option) {
-      return Boolean(option) && (option.id === "own:herbProduct" || option.id === "own:herbEvent");
+      return Boolean(option) && (option.id === "own:herb" || option.id === "own:herbProduct" || option.id === "own:herbEvent");
+    }
+
+    function isCombinedHerbOption(option) {
+      return Boolean(option) && option.id === "own:herb";
+    }
+
+    function isCombinedHerbManufacturingRecord(record) {
+      return Boolean(record) && (record.recipeId === "own:herb" || record.herbStandardPackageCount != null || record.herbEventPieceCount != null);
     }
 
     function herbRecordOptionId(record) {
@@ -1544,20 +1868,67 @@
     }
 
     function packagingSpecForRecordOption(option) {
-      if (!option || option.category !== "自社レシピ") return null;
+      if (!option) return null;
       const productId = packagingProductIdForOption(option);
       const packagingName = option.packagingKey === "herbEvent" ? "イベント" : "通常";
+      return packagingSpecForProductAndName(productId, packagingName);
+    }
+
+    function packagingMasterIssue(productId, packagingName = "通常") {
+      if (!productId || !PRODUCT_MASTER.some((item) => item.productId === productId)) return "商品IDに対応する商品マスタが見つかりません。";
+      const matching = loadPackagingMaster().filter((item) => item.productId === productId && item.packagingName === packagingName);
+      if (matching.length === 0) return `${packagingName}の包装マスタが見つかりません。`;
+      const registered = matching.filter((item) => item.isActive !== false).sort((a, b) => Number(a.displayOrder || 0) - Number(b.displayOrder || 0))[0];
+      if (!registered) return `${packagingName}に使用中の包装がありません。`;
+      if (!registered.packagingId) return "包装IDが設定されていません。";
+      if (!registered.packageUnit) return "包装単位が設定されていません。";
+      const hasFixedPieces = Number.isFinite(Number(registered.quantityPerPackage)) && Number(registered.quantityPerPackage) > 0;
+      const hasRange = Number(registered.minQuantityPerPackage) > 0 && Number(registered.maxQuantityPerPackage) >= Number(registered.minQuantityPerPackage);
+      if (!hasFixedPieces && !hasRange) return "内容本数が設定されていません。";
+      if (!hasRange && (!Number.isFinite(Number(registered.netWeightG)) || Number(registered.netWeightG) <= 0)) return "内容量が設定されていません。";
+      if (!Number.isFinite(Number(registered.unitWeightG)) || Number(registered.unitWeightG) <= 0) return "1本重量が設定されていません。";
+      return "";
+    }
+
+    function packagingMasterIssueForOption(option) {
+      if (!option) return "レシピ情報が見つかりません。";
+      const packagingName = option.packagingKey === "herbEvent" ? "イベント" : "通常";
+      return packagingMasterIssue(packagingProductIdForOption(option), packagingName);
+    }
+
+    function packagingMasterUserMessage(option, issue, logIssue = false) {
+      const name = option ? (option.savedRecipeName || option.label || "選択商品の") : "選択商品の";
+      if (logIssue && issue && globalThis.console && typeof console.error === "function") console.error(`[包装マスタ] ${name}: ${issue}`);
+      return `${name}の包装基準が不足しています。包装マスタを確認してください。`;
+    }
+
+    function packagingSpecForProductAndName(productId, packagingName) {
+      if (packagingMasterIssue(productId, packagingName)) return null;
       const registered = loadPackagingMaster()
         .filter((item) => item.productId === productId && item.packagingName === packagingName && item.isActive !== false)
         .sort((a, b) => Number(a.displayOrder || 0) - Number(b.displayOrder || 0))[0];
-      if (!registered) return null;
+      const hasRange = Number(registered.minQuantityPerPackage) > 0 && Number(registered.maxQuantityPerPackage) >= Number(registered.minQuantityPerPackage);
+      const isPieceUnit = registered.packageUnit === "本" || hasRange;
       return {
+        packagingId: registered.packagingId,
+        productId: registered.productId,
         unit: registered.packageUnit,
-        countLabel: registered.packageUnit === "本" ? "完成本数" : "包装数",
-        unitWeightLabel: registered.packageUnit === "本" ? "1本重量" : "1包装重量",
-        unitPiecesLabel: registered.packageUnit === "本" ? "" : "1包装本数",
-        unitWeight: Number(registered.netWeightG),
-        unitPieces: Number(registered.quantityPerPackage)
+        countLabel: isPieceUnit ? "完成本数" : "包装数",
+        unitWeightLabel: isPieceUnit ? "1本重量" : "1包装重量",
+        unitPiecesLabel: isPieceUnit ? "" : "1包装本数",
+        unitWeight: Number(isPieceUnit ? registered.unitWeightG : registered.netWeightG),
+        unitPieces: Number(registered.quantityPerPackage),
+        unitWeightG: Number(registered.unitWeightG),
+        minUnitPieces: registered.minQuantityPerPackage,
+        maxUnitPieces: registered.maxQuantityPerPackage,
+        packagingVersionId: registered.packagingVersionId || ""
+      };
+    }
+
+    function herbPackagingSpecs() {
+      return {
+        standard: packagingSpecForProductAndName("PROD_HERB", "通常"),
+        event: packagingSpecForProductAndName("PROD_HERB", "イベント")
       };
     }
 
@@ -1820,7 +2191,7 @@
     function togeComponentTypeForOption(option) {
       if (!option || option.category !== "自社レシピ") return "";
       if (option.packagingKey === "arabiki") return "arabiki";
-      if (option.packagingKey === "herbProduct" || option.packagingKey === "herbEvent") return "herb";
+      if (option.id === "own:herb" || option.packagingKey === "herbProduct" || option.packagingKey === "herbEvent") return "herb";
       return "";
     }
 
@@ -1828,7 +2199,7 @@
       if (record.togeComponentType) return record.togeComponentType;
       if (record.category !== "自社レシピ") return "";
       if (record.packagingKey === "arabiki" || record.savedRecipeName === "あらびき") return "arabiki";
-      if (record.packagingKey === "herbProduct" || record.packagingKey === "herbEvent" || record.savedRecipeName === "ハーブ") return "herb";
+      if (record.recipeId === "own:herb" || record.packagingKey === "herbProduct" || record.packagingKey === "herbEvent" || record.savedRecipeName === "ハーブ") return "herb";
       return "";
     }
 
@@ -1902,7 +2273,7 @@
     function bindManufacturingRecordForm(draft = {}) {
       const ids = [
         "recordSavedRecipeId", "recordPrepDate", "recordDate", "recordCategory", "recordRecipe", "recordLot", "recordMemo",
-        "recordPackageCount", "recordSmokedCount", "recordUnsmokedCount", "recordLossCount", "recordLeftoverWeight",
+        "recordPackageCount", "recordHerbStandardPackageCount", "recordHerbEventPieceCount", "recordSmokedCount", "recordUnsmokedCount", "recordLossCount", "recordLeftoverWeight",
         "recordTogeAllocationEnabled", "recordTogeAllocationId", "recordTogeGeneratedId", "recordTogePieceCount"
       ];
       const elements = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
@@ -1911,6 +2282,9 @@
       const recipeNameDisplay = document.getElementById("recordRecipeNameDisplay");
       const packagingStandard = document.getElementById("recordPackagingStandard");
       const packageCountLabel = document.getElementById("recordPackageCountLabel");
+      const herbCounts = document.getElementById("recordHerbCounts");
+      const herbStandardBasis = document.getElementById("recordHerbStandardBasis");
+      const herbEventBasis = document.getElementById("recordHerbEventBasis");
       const smokedCountLabel = document.getElementById("recordSmokedCountLabel");
       const unsmokedCountLabel = document.getElementById("recordUnsmokedCountLabel");
       const packWeightDisplay = document.getElementById("recordPackWeightDisplay");
@@ -1924,8 +2298,6 @@
       const togeFields = document.getElementById("recordTogeAllocationFields");
       const togeWeightDisplay = document.getElementById("recordTogeWeightDisplay");
       const togeStatus = document.getElementById("recordTogeStatus");
-      let previousRecipeOptionId = "";
-
       const refreshRecipeOptions = () => {
         const options = recordRecipeOptions(elements.recordCategory.value);
         elements.recordRecipe.innerHTML = options.map((option) => `<option value="${option.id}">${option.label}</option>`).join("");
@@ -1941,6 +2313,8 @@
             else elements[id].value = draft[id];
           }
         });
+        const draftOption = getRecordRecipeOption(elements.recordRecipe.value, elements.recordCategory.value);
+        if (isHerbRecordOption(draftOption)) elements.recordRecipe.value = "own:herb";
       };
 
       const configureTogeControls = () => {
@@ -1970,27 +2344,27 @@
           return;
         }
         document.getElementById("recordSave").disabled = false;
+        const selectedMasterIssue = isCombinedHerbOption(selectedOption)
+          ? (packagingMasterIssue("PROD_HERB", "通常") || packagingMasterIssue("PROD_HERB", "イベント"))
+          : packagingMasterIssueForOption(selectedOption);
+        if (selectedMasterIssue) status.textContent = packagingMasterUserMessage(selectedOption, selectedMasterIssue);
+        else if (status.textContent.includes("包装基準が不足しています")) status.textContent = "";
         const record = collectManufacturingRecord(elements);
         const isGibier = record.recipeKind === "gibier";
-        if (isHerbRecordOption(selectedOption)) {
-          const selectedId = selectedOption.id;
-          const herbOptions = recordRecipeOptions("自社レシピ").filter(isHerbRecordOption);
-          if (elements.recordRecipe.options.length !== herbOptions.length || ![...elements.recordRecipe.options].every((item) => herbOptions.some((option) => option.id === item.value))) {
-            elements.recordRecipe.innerHTML = herbOptions.map((option) => `<option value="${option.id}">${option.label}</option>`).join("");
-            elements.recordRecipe.value = selectedId;
-          }
-          elements.recordRecipe.hidden = false;
-          recipeNameDisplay.style.display = "none";
-        } else {
-          elements.recordRecipe.hidden = true;
-          recipeNameDisplay.style.display = "block";
-          recipeNameDisplay.textContent = selectedOption ? selectedOption.label : "レシピ情報を取得できません。";
-        }
-        previousRecipeOptionId = elements.recordRecipe.value;
+        const isCombinedHerb = isCombinedHerbOption(selectedOption);
+        elements.recordRecipe.hidden = true;
+        recipeNameDisplay.style.display = "block";
+        recipeNameDisplay.textContent = selectedOption.label;
         packagingStandard.innerHTML = packagingStandardHtml(packagingProductIdForOption(selectedOption));
         elements.recordLot.value = record.lot;
         packageCountLabel.childNodes[0].nodeValue = `${record.packageCountLabel}\n`;
-        packageCountLabel.style.display = isGibier ? "none" : "grid";
+        packageCountLabel.style.display = isGibier || isCombinedHerb ? "none" : "grid";
+        herbCounts.style.display = isCombinedHerb ? "grid" : "none";
+        if (isCombinedHerb) {
+          const specs = herbPackagingSpecs();
+          herbStandardBasis.textContent = specs.standard ? `基準：${formatPackagingNumber(specs.standard.unitPieces)}本／${formatPackagingNumber(specs.standard.unitWeight)}g` : "基準：包装マスタ未設定";
+          herbEventBasis.textContent = specs.event ? `基準：${formatPackagingNumber(specs.event.unitPieces)}本／${formatPackagingNumber(specs.event.unitWeight)}g` : "基準：包装マスタ未設定";
+        }
         smokedCountLabel.style.display = isGibier ? "grid" : "none";
         unsmokedCountLabel.style.display = isGibier ? "grid" : "none";
         if (isGibier) {
@@ -2006,9 +2380,9 @@
           savedCalcStatus.textContent = "保存済みのレシピ計算データが見つかりません。先にレシピページで計算結果を保存してください。";
           recipeResult.innerHTML = "";
         }
-        packWeightDisplay.style.display = isGibier ? "none" : "block";
+        packWeightDisplay.style.display = isGibier || isCombinedHerb ? "none" : "block";
         packWeightDisplay.textContent = `${record.unitWeightLabel}: ${record.packWeight == null ? "未設定" : `${formatRecordNumber(record.packWeight)}g`}`;
-        packCountDisplay.style.display = !isGibier && record.unitPiecesLabel ? "block" : "none";
+        packCountDisplay.style.display = !isGibier && !isCombinedHerb && record.unitPiecesLabel ? "block" : "none";
         packCountDisplay.textContent = `${record.unitPiecesLabel}: ${record.packPieces == null ? "未設定" : `${record.packPieces}本`}`;
         completedCountDisplay.style.display = isGibier ? "block" : "none";
         completedCountDisplay.textContent = `完成本数: ${record.completedCount || 0}本`;
@@ -2030,22 +2404,12 @@
       });
       ids.forEach((id) => {
         if (id !== "recordCategory" && id !== "recordRecipe") elements[id].addEventListener("input", render);
-        if (id === "recordRecipe") elements[id].addEventListener("change", () => {
-          const nextOption = getRecordRecipeOption(elements.recordRecipe.value, elements.recordCategory.value);
-          const hasProductionCount = Number(elements.recordPackageCount.value || 0) > 0
-            || Number(elements.recordSmokedCount.value || 0) > 0
-            || Number(elements.recordUnsmokedCount.value || 0) > 0;
-          if (hasProductionCount && isHerbRecordOption(nextOption) && !confirm("レシピを変更すると、包装基準と完成重量が再計算されます。変更しますか？")) {
-            elements.recordRecipe.value = previousRecipeOptionId;
-            return;
-          }
-          render();
-        });
+        if (id === "recordRecipe") elements[id].addEventListener("change", render);
       });
       document.getElementById("recordGoodNotes").addEventListener("click", render);
       const recordSaveButton = document.getElementById("recordSave");
       let isSavingRecord = false;
-      recordSaveButton.addEventListener("click", () => {
+      recordSaveButton.addEventListener("click", async () => {
         if (isSavingRecord) return;
         if (!elements.recordPrepDate.value || !elements.recordDate.value || !elements.recordRecipe.value) {
           showSaveToast("必須項目を入力してください。", "error");
@@ -2055,8 +2419,13 @@
         recordSaveButton.disabled = true;
         try {
           const record = collectManufacturingRecord(elements);
-          if (record.savedUnitWeightG == null || !Number.isFinite(Number(record.savedUnitWeightG)) || Number(record.savedUnitWeightG) <= 0) {
-            showSaveToast("製品マスタに基準重量が登録されていないため保存できません。", "error");
+          const selectedOption = getRecordRecipeOption(elements.recordRecipe.value, elements.recordCategory.value);
+          const herbMasterIssue = isCombinedHerbOption(selectedOption) ? (packagingMasterIssue("PROD_HERB", "通常") || packagingMasterIssue("PROD_HERB", "イベント")) : "";
+          const masterIssue = herbMasterIssue || packagingMasterIssueForOption(selectedOption);
+          const missingHerbWeights = isCombinedHerbManufacturingRecord(record) && (!Number.isFinite(Number(record.herbStandardUnitWeightG)) || Number(record.herbStandardUnitWeightG) <= 0 || !Number.isFinite(Number(record.herbEventUnitWeightG)) || Number(record.herbEventUnitWeightG) <= 0);
+          const missingSingleWeight = !isCombinedHerbManufacturingRecord(record) && (record.savedUnitWeightG == null || !Number.isFinite(Number(record.savedUnitWeightG)) || Number(record.savedUnitWeightG) <= 0);
+          if (masterIssue || missingHerbWeights || missingSingleWeight) {
+            showSaveToast(packagingMasterUserMessage(selectedOption, masterIssue || "完成重量計算に必要な基準重量がありません。", true), "error");
             return;
           }
           const allocationError = validateTogeAllocation(record);
@@ -2064,17 +2433,18 @@
             showSaveToast(allocationError, "error");
             return;
           }
-          record.id = createRecordId("manufacturing-record");
+          record.id = window.MeatProductionSync ? window.MeatProductionSync.uuid() : createRecordId("manufacturing-record");
           record.manufacturingRecordId = record.id;
           record.createdAt = new Date().toISOString();
           record.updatedAt = new Date().toISOString();
           record.savedAt = record.createdAt;
+          const syncResult = await saveManufacturingRecordOfflineFirst(record);
           const records = loadManufacturingRecords();
           records.unshift(record);
           saveManufacturingRecords(records);
           clearScreenState();
           goodNotesText.value = buildManufacturingRecordText(record);
-          showSaveToast("保存しました。");
+          showSaveToast(syncResult.synced ? "保存しました。" : "端末に保存しました。クラウド同期は保留中です。");
         } catch (error) {
           showSaveToast("保存できませんでした。もう一度お試しください。", "error");
         } finally {
@@ -2094,24 +2464,34 @@
         : findSavedRecipeCalculation(elements.recordPrepDate.value, option.category, option.savedRecipeName || option.label);
       const packagingSpec = packagingSpecForRecordOption(option);
       const isGibier = option.recipe.kind === "gibier";
-      const packagingUnit = isGibier ? "本" : (packagingSpec ? packagingSpec.unit : "");
-      const unitWeight = isGibier ? 70 : (packagingSpec ? packagingSpec.unitWeight : null);
-      const unitPieces = isGibier ? 1 : (packagingSpec ? packagingSpec.unitPieces : null);
+      const isCombinedHerb = isCombinedHerbOption(option);
+      const herbSpecs = isCombinedHerb ? herbPackagingSpecs() : { standard: null, event: null };
+      const packagingUnit = isCombinedHerb ? (herbSpecs.standard ? herbSpecs.standard.unit : "") : (isGibier ? "本" : (packagingSpec ? packagingSpec.unit : ""));
+      const unitWeight = isCombinedHerb ? null : (packagingSpec ? packagingSpec.unitWeight : null);
+      const unitPieces = isCombinedHerb ? null : (packagingSpec ? packagingSpec.unitPieces : null);
       const inputCount = Number(elements.recordPackageCount.value || 0);
+      const herbStandardPackageCount = isCombinedHerb ? Number(elements.recordHerbStandardPackageCount.value || 0) : null;
+      const herbEventPieceCount = isCombinedHerb ? Number(elements.recordHerbEventPieceCount.value || 0) : null;
       const theoreticalFinishedWeight = savedCalculation ? Number(savedCalculation.theoreticalFinishedWeight || 0) : 0;
-      const gibierMetrics = calculateGibierProductionMetrics(elements.recordSmokedCount.value, elements.recordUnsmokedCount.value, theoreticalFinishedWeight);
+      const gibierMetrics = calculateGibierProductionMetrics(elements.recordSmokedCount.value, elements.recordUnsmokedCount.value, theoreticalFinishedWeight, unitWeight);
       const smokedCount = isGibier ? gibierMetrics.smokedCount : 0;
       const unsmokedCount = isGibier ? gibierMetrics.unsmokedCount : 0;
       const completedNumber = isGibier ? gibierMetrics.completedCount : inputCount;
-      const packageCount = packagingUnit === "本" ? "" : elements.recordPackageCount.value;
-      const completedCount = packagingUnit === "本" ? String(completedNumber) : "";
+      const packageCount = isCombinedHerb || packagingUnit === "本" ? "" : elements.recordPackageCount.value;
+      const completedCount = isCombinedHerb ? "" : (packagingUnit === "本" ? String(completedNumber) : "");
       const togeComponentType = togeComponentTypeForOption(option);
       const togeAllocationEnabled = Boolean(togeComponentType && elements.recordTogeAllocationEnabled && elements.recordTogeAllocationEnabled.checked);
       const togePieceCount = togeAllocationEnabled ? Number(elements.recordTogePieceCount.value || 0) : 0;
       const togeAllocatedWeight = togeAllocationEnabled && Number.isFinite(togePieceCount) ? togePieceCount * 35 : 0;
       const selectedTogeId = elements.recordTogeAllocationId ? elements.recordTogeAllocationId.value : "";
       const togeAllocationId = togeAllocationEnabled ? (selectedTogeId === "__new__" ? elements.recordTogeGeneratedId.value : selectedTogeId) : "";
-      const baseFinishedWeight = isGibier ? gibierMetrics.actualCompletedWeight : (unitWeight == null ? null : completedNumber * unitWeight);
+      const herbStandardUnitWeightG = herbSpecs.standard ? herbSpecs.standard.unitWeight : null;
+      const herbEventUnitWeightG = herbSpecs.event ? herbSpecs.event.unitWeight : null;
+      const herbStandardFinishedWeightG = isCombinedHerb && herbStandardUnitWeightG != null ? herbStandardPackageCount * herbStandardUnitWeightG : null;
+      const herbEventFinishedWeightG = isCombinedHerb && herbEventUnitWeightG != null ? herbEventPieceCount * herbEventUnitWeightG : null;
+      const baseFinishedWeight = isCombinedHerb
+        ? (herbStandardFinishedWeightG == null || herbEventFinishedWeightG == null ? null : herbStandardFinishedWeightG + herbEventFinishedWeightG)
+        : (isGibier ? gibierMetrics.actualCompletedWeight : (unitWeight == null ? null : completedNumber * unitWeight));
       const finishedWeight = baseFinishedWeight == null ? null : baseFinishedWeight + togeAllocatedWeight;
       const yieldRate = isGibier ? gibierMetrics.yieldRate : (finishedWeight == null || theoreticalFinishedWeight <= 0 ? null : finishedWeight / theoreticalFinishedWeight * 100);
       return {
@@ -2120,14 +2500,15 @@
         category: option.category,
         recipeId: option.id,
         productId: packagingProductIdForOption(option),
-        recipeName: option.label,
+        packagingId: packagingSpec ? packagingSpec.packagingId : "",
+        recipeName: isCombinedHerb ? "ハーブ" : option.label,
         savedRecipeName: option.savedRecipeName || option.label,
-        recipeCode: option.packagingKey === "herbProduct" ? "HERB-P" : option.packagingKey === "herbEvent" ? "HERB-E" : recipeCodeForRecipe(option.recipe),
+        recipeCode: isCombinedHerb ? "HERB" : (option.packagingKey === "herbProduct" ? "HERB-P" : option.packagingKey === "herbEvent" ? "HERB-E" : recipeCodeForRecipe(option.recipe)),
         packagingKey: option.packagingKey || "",
         packagingUnit,
-        packageCountLabel: packagingUnit === "本" ? "完成本数" : "包装数",
-        unitWeightLabel: packagingUnit === "本" ? "1本重量" : "1袋重量",
-        unitPiecesLabel: packagingUnit === "袋" ? "1袋本数" : "",
+        packageCountLabel: packagingSpec ? packagingSpec.countLabel : (packagingUnit === "本" ? "完成本数" : "包装数"),
+        unitWeightLabel: packagingSpec ? packagingSpec.unitWeightLabel : (packagingUnit === "本" ? "1本重量" : "1包装重量"),
+        unitPiecesLabel: packagingSpec ? packagingSpec.unitPiecesLabel : "",
         recipeKind: option.recipe.kind,
         lot: savedCalculation && savedCalculation.lot ? savedCalculation.lot : generateManufacturingLot(elements.recordDate.value, option.category, option.recipe, option.packagingKey),
         memo: elements.recordMemo.value.trim(),
@@ -2146,6 +2527,14 @@
         packagingUnit,
         packageCount,
         completedCount,
+        herbStandardPackageCount,
+        herbEventPieceCount,
+        herbStandardPackagingId: herbSpecs.standard ? herbSpecs.standard.packagingId : "",
+        herbEventPackagingId: herbSpecs.event ? herbSpecs.event.packagingId : "",
+        herbStandardUnitWeightG,
+        herbEventUnitWeightG,
+        herbStandardFinishedWeightG,
+        herbEventFinishedWeightG,
         smokedCount,
         unsmokedCount,
         lossCount: elements.recordLossCount.value,
@@ -2170,6 +2559,7 @@
 
     function buildManufacturingRecordText(record) {
       const isGibier = isGibierManufacturingRecord(record);
+      const isCombinedHerb = isCombinedHerbManufacturingRecord(record);
       const countLabel = record.packagingUnit === "本" ? "完成本数" : "包装数";
       const countValue = record.packagingUnit === "本" ? record.completedCount : record.packageCount;
       const lines = [
@@ -2186,11 +2576,15 @@
         `乳化生地重量：${formatRecordNumber(record.emulsionWeight)}g`,
         `合計重量：${formatRecordNumber(record.totalWeight)}g`,
         "",
-        ...(isGibier ? [
+        ...(isCombinedHerb ? [
+          `製品用：${record.herbStandardPackageCount || 0}パック`,
+          `イベント用：${record.herbEventPieceCount || 0}本`
+        ] : isGibier ? [
           `燻製本数：${record.smokedCount || 0}`,
           `燻製なし本数：${record.unsmokedCount || 0}`,
           `完成本数：${record.completedCount || 0}`
         ] : [`${countLabel}：${countValue || ""}`]),
+        ...(record.togeAllocationEnabled ? [`峠の茶屋用：${record.togePieceCount || 0}本`] : []),
         `ロス本数：${record.lossCount || ""}`,
         `余り重量：${formatRecordNumber(record.leftoverWeight || 0)}g`,
         `完成重量：${record.finishedWeight == null ? "計算不可" : `${formatRecordNumber(record.finishedWeight)}g`}`,
@@ -2252,7 +2646,7 @@
         };
         return normalizedItem;
       });
-      return normalized;
+      return normalized.filter((record) => record.status !== "deleted");
     }
 
     function saveManufacturingRecords(records) {
@@ -2263,30 +2657,67 @@
       return record.manufacturingRecordId || record.id;
     }
 
-    function showManufacturingRecordHistory(backHandler = showManufacturingRecordTop, message = "") {
-      saveScreenState("recordHistory", ["home", "records", "history"]);
-      setHeader("製造記録履歴", "保存した記録", true, backHandler);
-      const records = loadManufacturingRecords();
+    function renderManufacturingRecordHistory(records, message = "", cacheNotice = "") {
+      const lastSync = window.MeatProductionSync ? "" : "";
       app.innerHTML = `
         <section class="section">
           <h2>製造記録履歴</h2>
           ${message ? `<div class="status">${escapeHtml(message)}</div>` : ""}
-          ${records.length === 0 ? `<div class="empty">保存された製造記録はまだありません。</div>` : `
+          ${cacheNotice ? `<div class="note">${escapeHtml(cacheNotice)}</div>` : ""}
+          <div class="record-actions" style="margin-bottom: 12px;">
+            <button id="recordHistoryRefresh" class="secondary" type="button">最新データに更新</button>
+            <span id="recordHistorySyncTime" class="status">${lastSync}</span>
+          </div>
+          ${records.length === 0 ? `<div class="empty">この端末には保存済みの製造履歴がありません。<br>インターネット接続後に同期してください。</div>` : `
             <div class="grid menu-grid">
               ${records.map((record) => `
                 <button class="menu-button" type="button" data-type="record-detail" data-id="${manufacturingRecordId(record)}">
                   <strong>${escapeHtml(record.date || "日付未入力")} ${escapeHtml(record.recipeName || record.product || "レシピ未入力")}</strong>
-                  <span>仕込み日: ${escapeHtml(record.prepDate || "")} / ${escapeHtml(record.category || "")} / ロット: ${escapeHtml(record.lot || "未入力")} / ${escapeHtml(record.packagingUnit === "本" ? "完成本数" : "包装数")}: ${escapeHtml((record.packagingUnit === "本" ? record.completedCount : record.packageCount) || "0")} / ロス本数: ${escapeHtml(record.lossCount || "0")} / 実績歩留まり: ${yieldDisplayText(record)}</span>
+                  <span>仕込み日: ${escapeHtml(record.prepDate || "")} / ${escapeHtml(record.category || "")} / ロット: ${escapeHtml(record.lot || "未入力")} / ${isCombinedHerbManufacturingRecord(record) ? `製品用: ${escapeHtml(record.herbStandardPackageCount || "0")}パック / イベント用: ${escapeHtml(record.herbEventPieceCount || "0")}本` : `${escapeHtml(record.packagingUnit === "本" ? "完成本数" : "包装数")}: ${escapeHtml((record.packagingUnit === "本" ? record.completedCount : record.packageCount) || "0")}`} / ロス本数: ${escapeHtml(record.lossCount || "0")} / 実績歩留まり: ${yieldDisplayText(record)}${record.syncStatus === "pending" ? " / 未同期" : record.syncStatus === "error" ? " / 同期エラー" : ""}</span>
                 </button>
               `).join("")}
             </div>
           `}
         </section>
       `;
+      document.getElementById("recordHistoryRefresh").addEventListener("click", () => refreshManufacturingHistory(true));
+      if (window.MeatProductionSync) {
+        window.MeatProductionSync.getMeta("last_history_sync_at").then((value) => {
+          const status = document.getElementById("recordHistorySyncTime");
+          if (status && value) status.textContent = `最終同期：${new Date(value).toLocaleString("ja-JP")}`;
+        }).catch(() => {});
+      }
+    }
+
+    async function refreshManufacturingHistory(showResult = false) {
+      let localRecords = [];
+      try {
+        localRecords = await loadIndexedManufacturingHistory();
+        renderManufacturingRecordHistory(combinedManufacturingHistory(localRecords));
+      } catch (error) {
+        renderManufacturingRecordHistory(loadManufacturingRecords());
+      }
+      try {
+        await window.MeatProductionSync.refreshHistoryCache();
+        const refreshed = await loadIndexedManufacturingHistory();
+        renderManufacturingRecordHistory(combinedManufacturingHistory(refreshed), showResult ? "最新データへ更新しました。" : "");
+      } catch (error) {
+        const cached = localRecords.length ? localRecords : await loadIndexedManufacturingHistory().catch(() => []);
+        const combined = combinedManufacturingHistory(cached);
+        renderManufacturingRecordHistory(combined, "", combined.length ? "オフラインのため、この端末に保存されている製造履歴を表示しています。" : "");
+      }
+    }
+
+    function showManufacturingRecordHistory(backHandler = showManufacturingRecordTop, message = "") {
+      saveScreenState("recordHistory", ["home", "records", "history"]);
+      setHeader("製造記録履歴", "保存した記録", true, backHandler);
+      const records = loadManufacturingRecords();
+      renderManufacturingRecordHistory(records, message);
+      refreshManufacturingHistory(false);
     }
 
     function showManufacturingRecordDetail(recordId, editMode = false, message = "") {
-      const record = loadManufacturingRecords().find((item) => manufacturingRecordId(item) === recordId);
+      const record = manufacturingIndexedHistory.get(recordId) || loadManufacturingRecords().find((item) => manufacturingRecordId(item) === recordId);
       setHeader("製造記録詳細", editMode ? "編集中" : "保存内容", true, showManufacturingRecordHistory);
       if (!record) {
         app.innerHTML = `<section class="section"><div class="empty">製造記録が見つかりません。</div></section>`;
@@ -2329,6 +2760,7 @@
 
     function manufacturingRecordReadHtml(record, hideCategory = false) {
       const isGibier = isGibierManufacturingRecord(record);
+      const isCombinedHerb = isCombinedHerbManufacturingRecord(record);
       const countLabel = record.packagingUnit === "本" ? "完成本数" : "包装数";
       const countValue = record.packagingUnit === "本" ? record.completedCount : record.packageCount;
       const togeState = record.togeAllocationEnabled ? togeAllocationState(record.togeAllocationId, record, manufacturingRecordId(record)).message : "";
@@ -2344,7 +2776,10 @@
           <div>水：${formatRecordNumber(record.waterAmount)}g</div>
           <div>乳化生地重量：${formatRecordNumber(record.emulsionWeight)}g</div>
           <div>合計重量：${formatRecordNumber(record.totalWeight)}g</div>
-          ${isGibier ? `
+          ${isCombinedHerb ? `
+            <div>製品用：${escapeHtml(record.herbStandardPackageCount || "0")}パック</div>
+            <div>イベント用：${escapeHtml(record.herbEventPieceCount || "0")}本</div>
+          ` : isGibier ? `
             <div>燻製本数：${escapeHtml(record.smokedCount || "0")}</div>
             <div>燻製なし本数：${escapeHtml(record.unsmokedCount || "0")}</div>
             <div>完成本数：${escapeHtml(record.completedCount || "0")}</div>
@@ -2366,7 +2801,7 @@
 
     function manufacturingRecordEditHtml(record) {
       const isGibier = isGibierManufacturingRecord(record);
-      const herbOptionId = herbRecordOptionId(record);
+      const isCombinedHerb = isCombinedHerbManufacturingRecord(record);
       const togeComponentType = togeComponentTypeForRecord(record);
       const allocationOptions = togeComponentType ? availableTogeAllocations(togeComponentType, manufacturingRecordId(record)) : [];
       const currentAllocationId = record.togeAllocationId || "";
@@ -2376,12 +2811,7 @@
             <input id="editRecordPrepDate" type="date" value="${escapeHtml(record.prepDate || todayString())}" readonly>
           </label>
           <label>レシピ名
-            ${herbOptionId ? `
-              <select id="editRecordRecipe">
-                <option value="own:herbProduct" ${herbOptionId === "own:herbProduct" ? "selected" : ""}>ハーブ（製品用）</option>
-                <option value="own:herbEvent" ${herbOptionId === "own:herbEvent" ? "selected" : ""}>ハーブ（イベント用）</option>
-              </select>
-            ` : `<div class="product-name">${escapeHtml(record.recipeName || "")}</div>`}
+            <div class="product-name">${escapeHtml(record.recipeName || "")}</div>
           </label>
         </div>
         <div class="field-row">
@@ -2394,7 +2824,20 @@
         </div>
         <h2>製造数記録</h2>
         <div class="field-row">
-          ${isGibier ? `
+          ${isCombinedHerb ? `
+          <div>
+            <div class="product-name">製品用</div>
+            <label>包装数（パック）
+              <input id="editRecordHerbStandardPackageCount" type="number" inputmode="numeric" min="0" step="1" value="${escapeHtml(record.herbStandardPackageCount || "0")}">
+            </label>
+            <div class="note">保存時基準：${formatRecordNumber(record.herbStandardUnitWeightG || 0)}g／パック</div>
+            <div class="product-name">イベント用</div>
+            <label>本数（本）
+              <input id="editRecordHerbEventPieceCount" type="number" inputmode="numeric" min="0" step="1" value="${escapeHtml(record.herbEventPieceCount || "0")}">
+            </label>
+            <div class="note">保存時基準：${formatRecordNumber(record.herbEventUnitWeightG || 0)}g／本</div>
+          </div>
+          ` : isGibier ? `
           <label>燻製本数（本）
             <input id="editRecordSmokedCount" type="number" inputmode="numeric" min="0" step="1" value="${escapeHtml(record.smokedCount || "0")}">
           </label>
@@ -2441,8 +2884,9 @@
     function bindManufacturingRecordEdit(record) {
       const prepDate = document.getElementById("editRecordPrepDate");
       const date = document.getElementById("editRecordDate");
-      const recipeSelect = document.getElementById("editRecordRecipe");
       const packageCount = document.getElementById("editRecordPackageCount");
+      const herbStandardPackageCount = document.getElementById("editRecordHerbStandardPackageCount");
+      const herbEventPieceCount = document.getElementById("editRecordHerbEventPieceCount");
       const packageCountLabel = document.getElementById("editRecordPackageCountLabel");
       const smokedCount = document.getElementById("editRecordSmokedCount");
       const unsmokedCount = document.getElementById("editRecordUnsmokedCount");
@@ -2455,31 +2899,6 @@
       const togeGeneratedId = document.getElementById("editRecordTogeGeneratedId");
       const togePieceCount = document.getElementById("editRecordTogePieceCount");
       const preview = document.getElementById("recordEditPreview");
-      let previousEditRecipeOptionId = recipeSelect ? recipeSelect.value : "";
-      const editBaseRecord = () => {
-        if (!recipeSelect || recipeSelect.value === herbRecordOptionId(record)) return record;
-        const option = getRecordRecipeOption(recipeSelect.value, "自社レシピ");
-        const packagingSpec = packagingSpecForRecordOption(option);
-        if (!option || !packagingSpec) return record;
-        return {
-          ...record,
-          recipeId: option.id,
-          productId: packagingProductIdForOption(option),
-          recipeName: option.label,
-          savedRecipeName: option.savedRecipeName,
-          recipeCode: option.packagingKey === "herbEvent" ? "HERB-E" : "HERB-P",
-          packagingKey: option.packagingKey,
-          packagingUnit: packagingSpec.unit,
-          packageCountLabel: packagingSpec.unit === "本" ? "完成本数" : "包装数",
-          unitWeightLabel: packagingSpec.unit === "本" ? "1本重量" : "1袋重量",
-          unitPiecesLabel: packagingSpec.unit === "本" ? "" : "1袋本数",
-          packWeight: packagingSpec.unitWeight,
-          packPieces: packagingSpec.unitPieces,
-          unitWeight: packagingSpec.unitWeight,
-          unitPieces: packagingSpec.unitPieces,
-          savedUnitWeightG: packagingSpec.unitWeight
-        };
-      };
       const allocationValues = () => ({
         enabled: Boolean(togeEnabled && togeEnabled.checked),
         id: togeId ? (togeId.value === "__new__" ? togeGeneratedId.value : togeId.value) : "",
@@ -2488,33 +2907,17 @@
       const renderPreview = () => {
         if (togeFields) togeFields.style.display = togeEnabled.checked ? "grid" : "none";
         const allocation = allocationValues();
-        const baseRecord = editBaseRecord();
-        if (packageCountLabel) packageCountLabel.childNodes[0].nodeValue = `${baseRecord.packageCountLabel || "包装数"}\n`;
-        const updated = recalculateManufacturingRecord(baseRecord, prepDate.value, date.value, packageCount ? packageCount.value : "", lossCount.value, leftoverWeight.value, memo.value, smokedCount ? smokedCount.value : "0", unsmokedCount ? unsmokedCount.value : "0", allocation.enabled, allocation.id, allocation.pieceCount);
+        if (packageCountLabel) packageCountLabel.childNodes[0].nodeValue = `${record.packageCountLabel || "包装数"}\n`;
+        const updated = recalculateManufacturingRecord(record, prepDate.value, date.value, packageCount ? packageCount.value : "", lossCount.value, leftoverWeight.value, memo.value, smokedCount ? smokedCount.value : "0", unsmokedCount ? unsmokedCount.value : "0", allocation.enabled, allocation.id, allocation.pieceCount, herbStandardPackageCount ? herbStandardPackageCount.value : "0", herbEventPieceCount ? herbEventPieceCount.value : "0");
         preview.innerHTML = manufacturingRecordReadHtml(updated, true);
         document.getElementById("recordDetailText").value = buildManufacturingRecordText(updated);
       };
-      [prepDate, date, packageCount, smokedCount, unsmokedCount, lossCount, leftoverWeight, memo, togeEnabled, togeId, togePieceCount].filter(Boolean).forEach((element) => element.addEventListener("input", renderPreview));
+      [prepDate, date, packageCount, herbStandardPackageCount, herbEventPieceCount, smokedCount, unsmokedCount, lossCount, leftoverWeight, memo, togeEnabled, togeId, togePieceCount].filter(Boolean).forEach((element) => element.addEventListener("input", renderPreview));
       [togeEnabled, togeId].filter(Boolean).forEach((element) => element.addEventListener("change", renderPreview));
-      if (recipeSelect) recipeSelect.addEventListener("change", () => {
-        const selectedOption = getRecordRecipeOption(recipeSelect.value, "自社レシピ");
-        if (!selectedOption || !packagingSpecForRecordOption(selectedOption)) {
-          recipeSelect.value = previousEditRecipeOptionId;
-          showSaveToast("選択されたレシピ情報を取得できません。前の画面に戻って選択し直してください。", "error");
-          return;
-        }
-        const hasProductionCount = Number(packageCount ? packageCount.value : 0) > 0;
-        if (hasProductionCount && !confirm("レシピを変更すると、包装基準と完成重量が再計算されます。変更しますか？")) {
-          recipeSelect.value = previousEditRecipeOptionId;
-          return;
-        }
-        previousEditRecipeOptionId = recipeSelect.value;
-        renderPreview();
-      });
       document.getElementById("recordEditCancel").addEventListener("click", () => showManufacturingRecordDetail(manufacturingRecordId(record)));
       const editSaveButton = document.getElementById("recordEditSave");
       let isSavingRecordEdit = false;
-      editSaveButton.addEventListener("click", () => {
+      editSaveButton.addEventListener("click", async () => {
         if (isSavingRecordEdit) return;
         if (!prepDate.value || !date.value) {
           showSaveToast("必須項目を入力してください。", "error");
@@ -2524,11 +2927,15 @@
         editSaveButton.disabled = true;
         try {
           const allocation = allocationValues();
-          const updated = recalculateManufacturingRecord(editBaseRecord(), prepDate.value, date.value, packageCount ? packageCount.value : "", lossCount.value, leftoverWeight.value, memo.value, smokedCount ? smokedCount.value : "0", unsmokedCount ? unsmokedCount.value : "0", allocation.enabled, allocation.id, allocation.pieceCount);
+          const updated = recalculateManufacturingRecord(record, prepDate.value, date.value, packageCount ? packageCount.value : "", lossCount.value, leftoverWeight.value, memo.value, smokedCount ? smokedCount.value : "0", unsmokedCount ? unsmokedCount.value : "0", allocation.enabled, allocation.id, allocation.pieceCount, herbStandardPackageCount ? herbStandardPackageCount.value : "0", herbEventPieceCount ? herbEventPieceCount.value : "0");
           const quantityChanged = manufacturingCountForRecord(updated) !== manufacturingCountForRecord(record)
+            || Number(updated.herbStandardPackageCount || 0) !== Number(record.herbStandardPackageCount || 0)
+            || Number(updated.herbEventPieceCount || 0) !== Number(record.herbEventPieceCount || 0)
             || Number(updated.togePieceCount || 0) !== Number(record.togePieceCount || 0)
             || Boolean(updated.togeAllocationEnabled) !== Boolean(record.togeAllocationEnabled);
-          if (quantityChanged && (updated.savedUnitWeightG == null || !Number.isFinite(Number(updated.savedUnitWeightG)) || Number(updated.savedUnitWeightG) <= 0)) {
+          const missingHerbWeights = isCombinedHerbManufacturingRecord(updated) && (!Number.isFinite(Number(updated.herbStandardUnitWeightG)) || Number(updated.herbStandardUnitWeightG) <= 0 || !Number.isFinite(Number(updated.herbEventUnitWeightG)) || Number(updated.herbEventUnitWeightG) <= 0);
+          const missingSingleWeight = !isCombinedHerbManufacturingRecord(updated) && (updated.savedUnitWeightG == null || !Number.isFinite(Number(updated.savedUnitWeightG)) || Number(updated.savedUnitWeightG) <= 0);
+          if (quantityChanged && (missingHerbWeights || missingSingleWeight)) {
             showSaveToast("保存時基準重量がないため、完成数量を変更できません。", "error");
             return;
           }
@@ -2537,12 +2944,13 @@
             showSaveToast(allocationError, "error");
             return;
           }
+          const syncResult = await saveManufacturingRecordOfflineFirst(updated);
           const records = loadManufacturingRecords();
           const index = records.findIndex((item) => manufacturingRecordId(item) === manufacturingRecordId(record));
           if (index >= 0) records[index] = updated;
           saveManufacturingRecords(records);
-          showManufacturingRecordDetail(manufacturingRecordId(record), false, "更新しました");
-          showSaveToast("保存しました。");
+          showManufacturingRecordDetail(manufacturingRecordId(updated), false, "更新しました");
+          showSaveToast(syncResult.synced ? "保存しました。" : "端末に保存しました。クラウド同期は保留中です。");
         } catch (error) {
           showSaveToast("保存できませんでした。もう一度お試しください。", "error");
         } finally {
@@ -2553,25 +2961,36 @@
       renderPreview();
     }
 
-    function recalculateManufacturingRecord(record, prepDate, date, countValue, lossCount, leftoverWeight, memo, smokedValue = "0", unsmokedValue = "0", togeEnabledValue = Boolean(record.togeAllocationEnabled), togeIdValue = record.togeAllocationId || "", togePieceValue = record.togePieceCount || 0) {
+    function recalculateManufacturingRecord(record, prepDate, date, countValue, lossCount, leftoverWeight, memo, smokedValue = "0", unsmokedValue = "0", togeEnabledValue = Boolean(record.togeAllocationEnabled), togeIdValue = record.togeAllocationId || "", togePieceValue = record.togePieceCount || 0, herbStandardValue = record.herbStandardPackageCount || 0, herbEventValue = record.herbEventPieceCount || 0) {
       const isGibier = isGibierManufacturingRecord(record);
+      const isCombinedHerb = isCombinedHerbManufacturingRecord(record);
       const theoreticalFinishedWeight = Number(record.theoreticalFinishedWeight || 0);
-      const gibierMetrics = calculateGibierProductionMetrics(smokedValue, unsmokedValue, theoreticalFinishedWeight);
+      const unitWeight = inferSavedUnitWeight(record, record.actualFinishedWeightG != null ? record.actualFinishedWeightG : record.finishedWeight);
+      const gibierMetrics = calculateGibierProductionMetrics(smokedValue, unsmokedValue, theoreticalFinishedWeight, unitWeight);
       const smokedCount = isGibier ? gibierMetrics.smokedCount : Number(record.smokedCount || 0);
       const unsmokedCount = isGibier ? gibierMetrics.unsmokedCount : Number(record.unsmokedCount || 0);
       const count = isGibier ? gibierMetrics.completedCount : Number(countValue || 0);
-      const unitWeight = inferSavedUnitWeight(record, record.actualFinishedWeightG != null ? record.actualFinishedWeightG : record.finishedWeight);
+      const herbStandardPackageCount = isCombinedHerb ? Number(herbStandardValue || 0) : null;
+      const herbEventPieceCount = isCombinedHerb ? Number(herbEventValue || 0) : null;
       const togeComponentType = togeComponentTypeForRecord(record);
       const togeAllocationEnabled = Boolean(togeComponentType && togeEnabledValue);
       const togePieceCount = togeAllocationEnabled ? Number(togePieceValue || 0) : 0;
       const togeAllocatedWeight = togeAllocationEnabled && Number.isFinite(togePieceCount) ? togePieceCount * 35 : 0;
       const originalCount = manufacturingCountForRecord(record);
-      const quantitiesChanged = isGibier
+      const quantitiesChanged = isCombinedHerb
+        ? herbStandardPackageCount !== Number(record.herbStandardPackageCount || 0) || herbEventPieceCount !== Number(record.herbEventPieceCount || 0) || togeAllocationEnabled !== Boolean(record.togeAllocationEnabled) || togePieceCount !== Number(record.togePieceCount || 0)
+        : isGibier
         ? smokedCount !== Number(record.smokedCount || 0) || unsmokedCount !== Number(record.unsmokedCount || 0)
         : count !== originalCount || togeAllocationEnabled !== Boolean(record.togeAllocationEnabled) || togePieceCount !== Number(record.togePieceCount || 0);
       const storedFinishedWeight = record.actualFinishedWeightG != null ? record.actualFinishedWeightG : record.finishedWeight;
       const storedYieldRate = record.actualYieldPercent != null ? record.actualYieldPercent : record.yieldRate;
-      const baseFinishedWeight = unitWeight == null ? null : count * unitWeight;
+      const herbStandardUnitWeightG = isCombinedHerb ? Number(record.herbStandardUnitWeightG) : null;
+      const herbEventUnitWeightG = isCombinedHerb ? Number(record.herbEventUnitWeightG) : null;
+      const herbStandardFinishedWeightG = isCombinedHerb && Number.isFinite(herbStandardUnitWeightG) && herbStandardUnitWeightG > 0 ? herbStandardPackageCount * herbStandardUnitWeightG : null;
+      const herbEventFinishedWeightG = isCombinedHerb && Number.isFinite(herbEventUnitWeightG) && herbEventUnitWeightG > 0 ? herbEventPieceCount * herbEventUnitWeightG : null;
+      const baseFinishedWeight = isCombinedHerb
+        ? (herbStandardFinishedWeightG == null || herbEventFinishedWeightG == null ? null : herbStandardFinishedWeightG + herbEventFinishedWeightG)
+        : (unitWeight == null ? null : count * unitWeight);
       const recalculatedFinishedWeight = baseFinishedWeight == null ? null : baseFinishedWeight + togeAllocatedWeight;
       const finishedWeight = !quantitiesChanged && storedFinishedWeight != null ? Number(storedFinishedWeight) : recalculatedFinishedWeight;
       const yieldRate = !quantitiesChanged && storedYieldRate != null
@@ -2582,8 +3001,14 @@
         prepDate,
         date,
         lot: generateLotFromExistingRecord(record, date),
-        packageCount: record.packagingUnit === "本" ? "" : countValue,
-        completedCount: record.packagingUnit === "本" ? String(count) : (record.completedCount || ""),
+        packageCount: isCombinedHerb || record.packagingUnit === "本" ? "" : countValue,
+        completedCount: isCombinedHerb ? "" : (record.packagingUnit === "本" ? String(count) : (record.completedCount || "")),
+        herbStandardPackageCount,
+        herbEventPieceCount,
+        herbStandardUnitWeightG,
+        herbEventUnitWeightG,
+        herbStandardFinishedWeightG,
+        herbEventFinishedWeightG,
         smokedCount,
         unsmokedCount,
         lossCount,
@@ -2628,10 +3053,15 @@
       return "RECIPE";
     }
 
-    function deleteManufacturingRecord(recordId) {
+    async function deleteManufacturingRecord(recordId) {
       if (!confirm("この製造記録を削除しますか？この操作は元に戻せません。")) return;
-      const records = loadManufacturingRecords().filter((record) => manufacturingRecordId(record) !== recordId);
       try {
+        const records = loadManufacturingRecords();
+        const index = records.findIndex((record) => manufacturingRecordId(record) === recordId);
+        if (index < 0) throw new Error("製造記録が見つかりません。");
+        const deletedRecord = { ...records[index], status: "deleted", updatedAt: new Date().toISOString() };
+        await saveManufacturingRecordOfflineFirst(deletedRecord);
+        records[index] = deletedRecord;
         saveManufacturingRecords(records);
         showManufacturingRecordHistory(showManufacturingRecordTop, "削除しました");
       } catch (error) {
@@ -2666,12 +3096,23 @@
         const completedCount = record.completedCount;
         const finishedWeight = record.actualFinishedWeightG != null ? record.actualFinishedWeightG : record.finishedWeight;
         const yieldRate = record.actualYieldPercent != null ? record.actualYieldPercent : record.yieldRate;
+        const componentType = togeComponentTypeForRecord(record);
+        const productPackageCount = isCombinedHerbManufacturingRecord(record)
+          ? record.herbStandardPackageCount
+          : (componentType === "arabiki" ? record.packageCount : "");
+        const eventPieceCount = isCombinedHerbManufacturingRecord(record) ? record.herbEventPieceCount : "";
+        const togePieceCount = record.togeAllocationEnabled ? record.togePieceCount : "";
+        const togeUsedWeight = record.togeAllocationEnabled ? record.togeAllocatedWeight : "";
         return [
         record.prepDate, record.date, record.category, record.recipeName || record.product, record.lot,
         csvNumber(record.meat6mm), csvNumber(record.meat3mm), csvNumber(record.meatTotal), csvNumber(record.waterAmount),
         csvNumber(record.emulsionWeight), csvNumber(record.totalWeight), record.packagingUnit,
         record.packageCount || "", completedCount || "", csvNumber(record.smokedCount || 0), csvNumber(record.unsmokedCount || 0), record.lossCount, csvNumber(record.leftoverWeight || 0),
-        csvNullableNumber(finishedWeight), csvNullableNumber(yieldRate), record.memo
+        csvNullableNumber(finishedWeight), csvNullableNumber(yieldRate), record.memo,
+        productPackageCount === "" || productPackageCount == null ? "" : csvNumber(productPackageCount),
+        eventPieceCount === "" || eventPieceCount == null ? "" : csvNumber(eventPieceCount),
+        togePieceCount === "" || togePieceCount == null ? "" : csvNumber(togePieceCount),
+        togeUsedWeight === "" || togeUsedWeight == null ? "" : csvNumber(togeUsedWeight)
         ];
       });
       return [MANUFACTURING_RECORD_CSV_HEADERS, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n");
