@@ -107,18 +107,49 @@
   }
 
   function validateMasterCounts(data) {
-    const expected = {
-      products: 9,
-      recipes: 8,
-      recipeVersions: 8,
-      recipeIngredients: 52,
-      packagingMasters: 10,
-      packagingVersions: 10
-    };
-    const mismatches = Object.entries(expected)
-      .filter(([key, count]) => data[key].length !== count)
-      .map(([key, count]) => `${key}: ${data[key].length}件（期待${count}件）`);
-    if (mismatches.length) throw new Error(`正式マスタ件数が一致しません。${mismatches.join("、")}`);
+    const requiredProductCodes = [
+      "ARABIKI", "CHEESE", "HERB", "CHORIZO", "ADDITIVE_FREE_ARABIKI",
+      "YAMAGOYA", "GIBIER_CENTER", "TOUGE", "ZANZATEI"
+    ];
+    const requiredRecipeCodes = [
+      "ARABIKI", "ADDITIVE_FREE_ARABIKI", "HERB", "CHEESE",
+      "CHORIZO", "YAMAGOYA", "GIBIER_CENTER", "ZANZATEI"
+    ];
+    const requiredPackagingCodes = [
+      "HERB_STANDARD", "HERB_EVENT", "TOUGE_STANDARD", "ARABIKI_STANDARD",
+      "CHEESE_STANDARD", "CHORIZO_STANDARD", "GIBIER_CENTER_STANDARD",
+      "ADDITIVE_FREE_ARABIKI_STANDARD", "YAMAGOYA_STANDARD", "ZANZATEI_STANDARD"
+    ];
+
+    const productCodes = new Set(data.products.map((row) => row.internal_code));
+    const recipeCodes = new Set(data.recipes.map((row) => row.internal_code));
+    const packagingCodes = new Set(data.packagingMasters.map((row) => row.internal_code));
+    const missingProducts = requiredProductCodes.filter((code) => !productCodes.has(code));
+    const missingRecipes = requiredRecipeCodes.filter((code) => !recipeCodes.has(code));
+    const missingPackaging = requiredPackagingCodes.filter((code) => !packagingCodes.has(code));
+
+    const recipeIdsWithCurrentVersion = new Set(data.recipeVersions.map((row) => row.recipe_id));
+    const recipesWithoutCurrentVersion = data.recipes
+      .filter((row) => requiredRecipeCodes.includes(row.internal_code) && !recipeIdsWithCurrentVersion.has(row.id))
+      .map((row) => row.internal_code);
+
+    const packagingIdsWithCurrentVersion = new Set(data.packagingVersions.map((row) => row.packaging_master_id));
+    const packagingWithoutCurrentVersion = data.packagingMasters
+      .filter((row) => requiredPackagingCodes.includes(row.internal_code) && !packagingIdsWithCurrentVersion.has(row.id))
+      .map((row) => row.internal_code);
+
+    const problems = [];
+    if (missingProducts.length) problems.push(`products不足: ${missingProducts.join(", ")}`);
+    if (missingRecipes.length) problems.push(`recipes不足: ${missingRecipes.join(", ")}`);
+    if (missingPackaging.length) problems.push(`packaging不足: ${missingPackaging.join(", ")}`);
+    if (recipesWithoutCurrentVersion.length) problems.push(`current recipe_version不足: ${recipesWithoutCurrentVersion.join(", ")}`);
+    if (packagingWithoutCurrentVersion.length) problems.push(`current packaging_version不足: ${packagingWithoutCurrentVersion.join(", ")}`);
+    if (problems.length) throw new Error(`正式マスタの必須項目を確認できません。${problems.join(" / ")}`);
+
+    const expectedIngredientMinimum = 52;
+    if (data.recipeIngredients.length < expectedIngredientMinimum) {
+      throw new Error(`recipe_ingredientsが不足しています。現在${data.recipeIngredients.length}件 / 最低${expectedIngredientMinimum}件`);
+    }
   }
 
   function publish(data, source, extra) {
