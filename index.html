@@ -1010,6 +1010,7 @@
 
     async function saveManufacturingRecordOfflineFirst(record) {
       await initializeManufacturingSync();
+      await initializeSupabaseMasterData();
       const bundle = window.MeatProductionSyncAdapter.fromLegacy(
         record,
         window.MEAT_SUPABASE_CONFIG || {},
@@ -1018,7 +1019,9 @@
       Object.assign(record, bundle.legacyRecordPatch);
       const result = await window.MeatProductionSync.saveAndSync(bundle.record, bundle.allocations);
       record.syncStatus = result.synced ? "synced" : "error";
-      record.syncError = result.error || "";
+      record.syncError = result.error
+        ? String(result.error && result.error.message ? result.error.message : result.error)
+        : "";
       return result;
     }
 
@@ -2673,7 +2676,7 @@
               ${records.map((record) => `
                 <button class="menu-button" type="button" data-type="record-detail" data-id="${manufacturingRecordId(record)}">
                   <strong>${escapeHtml(record.date || "日付未入力")} ${escapeHtml(record.recipeName || record.product || "レシピ未入力")}</strong>
-                  <span>仕込み日: ${escapeHtml(record.prepDate || "")} / ${escapeHtml(record.category || "")} / ロット: ${escapeHtml(record.lot || "未入力")} / ${isCombinedHerbManufacturingRecord(record) ? `製品用: ${escapeHtml(record.herbStandardPackageCount || "0")}パック / イベント用: ${escapeHtml(record.herbEventPieceCount || "0")}本` : `${escapeHtml(record.packagingUnit === "本" ? "完成本数" : "包装数")}: ${escapeHtml((record.packagingUnit === "本" ? record.completedCount : record.packageCount) || "0")}`} / ロス本数: ${escapeHtml(record.lossCount || "0")} / 実績歩留まり: ${yieldDisplayText(record)}${record.syncStatus === "pending" ? " / 未同期" : record.syncStatus === "error" ? " / 同期エラー" : ""}</span>
+                  <span>仕込み日: ${escapeHtml(record.prepDate || "")} / ${escapeHtml(record.category || "")} / ロット: ${escapeHtml(record.lot || "未入力")} / ${isCombinedHerbManufacturingRecord(record) ? `製品用: ${escapeHtml(record.herbStandardPackageCount || "0")}パック / イベント用: ${escapeHtml(record.herbEventPieceCount || "0")}本` : `${escapeHtml(record.packagingUnit === "本" ? "完成本数" : "包装数")}: ${escapeHtml((record.packagingUnit === "本" ? record.completedCount : record.packageCount) || "0")}`} / ロス本数: ${escapeHtml(record.lossCount || "0")} / 実績歩留まり: ${yieldDisplayText(record)}${record.syncStatus === "pending" ? " / 未同期" : record.syncStatus === "error" ? ` / 同期エラー${record.syncError ? `（${escapeHtml(String(record.syncError)).slice(0, 160)}）` : ""}` : ""}</span>
                 </button>
               `).join("")}
             </div>
@@ -2727,6 +2730,7 @@
         <section class="section">
           ${editMode ? "" : `<h2>${escapeHtml(record.recipeName || record.product || "レシピ未入力")}</h2>`}
           ${message ? `<div class="status">${escapeHtml(message)}</div>` : ""}
+          ${record.syncStatus === "error" ? `<div class="status error">同期エラー：${escapeHtml(String(record.syncError || "詳細不明"))}</div>` : ""}
           ${editMode ? manufacturingRecordEditHtml(record) : manufacturingRecordReadHtml(record)}
           ${editMode && record.recipeRows && record.recipeRows.length ? `<h2>レシピ由来の情報</h2>` : ""}
           ${record.recipeRows && record.recipeRows.length ? meatInfoHtml({ meat6mm: Number(record.meat6mm || 0), meat3mm: Number(record.meat3mm || 0), meatTotal: Number(record.meatTotal || 0) }) + tableHtml(record.recipeRows, Number(record.recipeTotal || 0)) : ""}
