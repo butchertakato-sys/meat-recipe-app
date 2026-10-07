@@ -342,7 +342,8 @@
       throw new Error("Manufacturing migration callbacks are missing");
     }
 
-    const local = loadLocal().map((row) => ({ ...row }));
+    const loaded = await loadLocal();
+    const local = (Array.isArray(loaded) ? loaded : []).map((row) => ({ ...row }));
     const cloud = await fetchCloudManufacturingRecords();
     const byLot = cloudLotMap(cloud);
     const conflicts = [];
@@ -415,23 +416,29 @@
     currentConfig = options.config || currentConfig || {};
     setStatus({ state: "running", error: "", conflicts: [] });
     try {
-      const ready = await schemaReady();
-      if (!ready) {
-        return setStatus({
-          state: "schema_required",
-          error: "Supabaseに端末統合用テーブルがありません。DB移行SQLの適用が必要です。"
-        });
+      let savedRecipes = null;
+      let savedRecipeSchemaReady = false;
+      try {
+        savedRecipeSchemaReady = await schemaReady();
+        if (savedRecipeSchemaReady) savedRecipes = await syncSavedRecipes();
+      } catch (error) {
+        savedRecipes = { error: String(error && error.message ? error.message : error) };
       }
 
-      const savedRecipes = await syncSavedRecipes();
       let manufacturing = null;
       if (options.manufacturing) manufacturing = await migrateManufacturingRecords(options.manufacturing);
+
       const conflicts = manufacturing ? manufacturing.conflicts : [];
+      const state = conflicts.length
+        ? "conflict"
+        : (savedRecipeSchemaReady ? "synced" : "partial");
+
       return setStatus({
-        state: conflicts.length ? "conflict" : "synced",
-        error: "",
+        state,
+        error: savedRecipeSchemaReady ? "" : "保存済みレシピ用のSupabaseテーブルが未適用です。製造記録の統合は継続します。",
         conflicts,
         savedRecipes,
+        savedRecipeSchemaReady,
         manufacturing
       });
     } catch (error) {
