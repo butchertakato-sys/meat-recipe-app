@@ -1034,7 +1034,18 @@
       if (!bundle.record.recipe_version_id) missingIds.push("recipe_version_id");
       if (missingIds.length) {
         const source = masterResult && masterResult.source ? masterResult.source : "不明";
-        throw new Error(`Supabase同期に必要なマスタIDが不足しています（${missingIds.join(", ")} / master source: ${source}）。`);
+        const error = new Error(`Supabase同期に必要なマスタIDが不足しています（${missingIds.join(", ")} / master source: ${source}）。`);
+        const local = await window.MeatProductionSync.putBundle(bundle.record, bundle.allocations, "error", error.message);
+        record.syncStatus = "error";
+        record.syncError = error.message;
+        return {
+          localSaved: true,
+          synced: false,
+          recordId: local.record.id,
+          error,
+          record: local.record,
+          allocations: local.allocations
+        };
       }
 
       const result = await window.MeatProductionSync.saveAndSync(bundle.record, bundle.allocations);
