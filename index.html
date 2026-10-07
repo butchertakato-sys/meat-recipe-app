@@ -551,6 +551,7 @@
   <script src="supabase/master-data.js"></script>
   <script src="supabase/offline-sync.js"></script>
   <script src="supabase/app-sync-adapter.js"></script>
+  <script src="supabase/cross-device-sync.js"></script>
   <script>
     /*
       開発用メモ: 肉重量1000g時の期待値
@@ -1008,7 +1009,7 @@
       return masterDataInitialization;
     }
 
-    async function saveManufacturingRecordOfflineFirst(record) {
+    async function saveManufacturingRecordOfflineFirst(record, options = {}) {
       await initializeManufacturingSync();
 
       let masterResult = await initializeSupabaseMasterData();
@@ -1025,6 +1026,17 @@
         window.MEAT_SUPABASE_CONFIG || {},
         window.MeatProductionSync
       );
+      if (!options.migration && window.MeatCrossDeviceSync && bundle.record.lot_number) {
+        const reservedLot = await window.MeatCrossDeviceSync.reserveManufacturingLot(bundle.record.id, bundle.record.lot_number);
+        if (reservedLot && reservedLot !== bundle.record.lot_number) {
+          bundle.record.lot_number = reservedLot;
+          if (bundle.record.legacy_payload && typeof bundle.record.legacy_payload === "object") {
+            bundle.record.legacy_payload = { ...bundle.record.legacy_payload, lot: reservedLot };
+          }
+          record.lot = reservedLot;
+        }
+      }
+
       Object.assign(record, bundle.legacyRecordPatch);
 
       const missingIds = [];
@@ -1147,13 +1159,70 @@
       return Array.from(records.values()).filter((record) => record.status !== "deleted").sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
     }
 
+    let crossDeviceIntegrationPromise = null;
+
+    function crossDeviceSyncStatusText() {
+      if (!window.MeatCrossDeviceSync) return "";
+      const status = window.MeatCrossDeviceSync.getStatus() || {};
+      if (status.state === "synced") {
+        const saved = status.savedRecipes || {};
+        const manufacturing = status.manufacturing || {};
+        return `端末統合：完了（レシピ${saved.total || 0}件 / 製造履歴${manufacturing.total || 0}件）`;
+      }
+      if (status.state === "conflict") {
+        const conflicts = Array.isArray(status.conflicts) ? status.conflicts : [];
+        const lots = conflicts.map((item) => item.lot || "LOT未設定").join("、");
+        return `端末統合：LOT確認が必要（${lots}）`;
+      }
+      if (status.state === "schema_required") return "端末統合：Supabase更新待ち";
+      if (status.state === "error") return `端末統合エラー：${status.error || "詳細不明"}`;
+      if (status.state === "running") return "端末統合：同期中";
+      return "端末統合：確認中";
+    }
+
+    async function runCrossDeviceIntegration() {
+      if (!window.MeatCrossDeviceSync) return null;
+      if (crossDeviceIntegrationPromise) return crossDeviceIntegrationPromise;
+      crossDeviceIntegrationPromise = (async () => {
+        await initializeManufacturingSync();
+        await initializeSupabaseMasterData();
+        window.MeatCrossDeviceSync.initialize(window.MEAT_SUPABASE_CONFIG || {});
+        const result = await window.MeatCrossDeviceSync.syncAll({
+          config: window.MEAT_SUPABASE_CONFIG || {},
+          manufacturing: {
+            loadLocal: loadManufacturingRecords,
+            saveLocal: saveManufacturingRecords,
+            uploadLocal: (record, options) => saveManufacturingRecordOfflineFirst(record, options)
+          }
+        });
+        if (result && result.state === "synced" && window.MeatProductionSync) {
+          await window.MeatProductionSync.refreshHistoryCache().catch(() => {});
+        }
+        const status = document.getElementById("crossDeviceSyncStatus");
+        if (status) status.textContent = crossDeviceSyncStatusText();
+        return result;
+      })().finally(() => {
+        crossDeviceIntegrationPromise = null;
+      });
+      return crossDeviceIntegrationPromise;
+    }
+
+    function scheduleSavedRecipeCloudSync() {
+      if (!window.MeatCrossDeviceSync) return;
+      setTimeout(() => {
+        window.MeatCrossDeviceSync.syncSavedRecipes().catch((error) => {
+          console.warn("[端末統合] 保存済みレシピ同期に失敗しました。", error);
+        });
+      }, 0);
+    }
+
     let applicationStarted = false;
 
     function startApplication() {
       if (applicationStarted) return;
       applicationStarted = true;
       initializeManufacturingSync().then((result) => refreshManufacturingSyncStatus(result.pendingCount)).catch(() => {});
-      initializeSupabaseMasterData();
+      initializeSupabaseMasterData().then(() => runCrossDeviceIntegration()).catch(() => {});
       const state = loadScreenState();
       if (state) {
         showRestorePrompt(state);
@@ -1350,10 +1419,15 @@
             <span id="manufacturingSyncStatus" class="status">未同期：確認中</span>
             <button id="manufacturingSyncRetry" class="secondary" type="button">同期を再試行</button>
           </div>
+          <div class="note" id="crossDeviceSyncStatus" style="margin-top: 10px;">${escapeHtml(crossDeviceSyncStatusText())}</div>
         </section>
       `;
-      document.getElementById("manufacturingSyncRetry").addEventListener("click", () => retryManufacturingSync(true));
+      document.getElementById("manufacturingSyncRetry").addEventListener("click", async () => {
+        await retryManufacturingSync(true);
+        await runCrossDeviceIntegration().catch(() => {});
+      });
       initializeManufacturingSync().then(() => window.MeatProductionSync.pendingCount()).then(refreshManufacturingSyncStatus).catch(() => {});
+      runCrossDeviceIntegration().catch(() => {});
     }
 
     const PRODUCT_MASTER = [
@@ -2004,11 +2078,12 @@
         updatedAt: new Date().toISOString()
       });
       records.unshift(enriched);
-      localStorage.setItem(SAVED_RECIPE_CALCULATIONS_KEY, JSON.stringify(records));
+      saveSavedRecipeCalculations(records);
     }
 
     function saveSavedRecipeCalculations(records) {
       localStorage.setItem(SAVED_RECIPE_CALCULATIONS_KEY, JSON.stringify(records));
+      scheduleSavedRecipeCloudSync();
     }
 
     function savedRecipeRecordId(record) {
@@ -2210,9 +2285,14 @@
       return enrichSavedRecipeCalculation({ ...record, prepDate, meat6mm, meat3mm, meatTotal, emulsionWeight, rows, total, memo, updatedAt: new Date().toISOString() });
     }
 
-    function deleteSavedRecipe(savedRecipeId) {
+    async function deleteSavedRecipe(savedRecipeId) {
       if (!confirm("この保存済みレシピを削除しますか？この操作は元に戻せません。")) return;
-      const records = loadSavedRecipeCalculations().filter((record) => savedRecipeRecordId(record) !== savedRecipeId);
+      const current = loadSavedRecipeCalculations();
+      const deleting = current.find((record) => savedRecipeRecordId(record) === savedRecipeId);
+      if (deleting && window.MeatCrossDeviceSync) {
+        await window.MeatCrossDeviceSync.markSavedRecipeDeleted(deleting).catch(() => {});
+      }
+      const records = current.filter((record) => savedRecipeRecordId(record) !== savedRecipeId);
       try {
         saveSavedRecipeCalculations(records);
         showSavedRecipeList("削除しました");
