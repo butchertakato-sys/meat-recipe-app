@@ -2077,11 +2077,12 @@
         updatedAt: new Date().toISOString()
       });
       records.unshift(enriched);
-      localStorage.setItem(SAVED_RECIPE_CALCULATIONS_KEY, JSON.stringify(records));
+      saveSavedRecipeCalculations(records);
     }
 
     function saveSavedRecipeCalculations(records) {
       localStorage.setItem(SAVED_RECIPE_CALCULATIONS_KEY, JSON.stringify(records));
+      scheduleSavedRecipeCloudSync();
     }
 
     function savedRecipeRecordId(record) {
