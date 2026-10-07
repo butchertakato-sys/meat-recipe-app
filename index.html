@@ -1418,10 +1418,15 @@
             <span id="manufacturingSyncStatus" class="status">未同期：確認中</span>
             <button id="manufacturingSyncRetry" class="secondary" type="button">同期を再試行</button>
           </div>
+          <div class="note" id="crossDeviceSyncStatus" style="margin-top: 10px;">${escapeHtml(crossDeviceSyncStatusText())}</div>
         </section>
       `;
-      document.getElementById("manufacturingSyncRetry").addEventListener("click", () => retryManufacturingSync(true));
+      document.getElementById("manufacturingSyncRetry").addEventListener("click", async () => {
+        await retryManufacturingSync(true);
+        await runCrossDeviceIntegration().catch(() => {});
+      });
       initializeManufacturingSync().then(() => window.MeatProductionSync.pendingCount()).then(refreshManufacturingSyncStatus).catch(() => {});
+      runCrossDeviceIntegration().catch(() => {});
     }
 
     const PRODUCT_MASTER = [
