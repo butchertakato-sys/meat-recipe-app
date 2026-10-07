@@ -247,7 +247,7 @@
         method: "POST",
         body: JSON.stringify({
           target_business_id: currentConfig.businessId,
-          lot_base: lotBase,
+          target_lot_base: lotBase,
           target_record_id: recordId
         })
       });
