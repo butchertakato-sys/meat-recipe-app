@@ -550,7 +550,7 @@
   <script src="supabase/auth.js"></script>
   <script src="supabase/master-data.js"></script>
   <script src="supabase/offline-sync.js"></script>
-  <script src="supabase/app-sync-adapter.js"></script>
+  <script src="supabase/app-sync-adapter.js"></script>\n  <script src="supabase/cross-device-sync.js"></script>
   <script>
     /*
       開発用メモ: 肉重量1000g時の期待値
@@ -1008,7 +1008,7 @@
       return masterDataInitialization;
     }
 
-    async function saveManufacturingRecordOfflineFirst(record) {
+    async function saveManufacturingRecordOfflineFirst(record, options = {}) {
       await initializeManufacturingSync();
 
       let masterResult = await initializeSupabaseMasterData();
@@ -1025,6 +1025,17 @@
         window.MEAT_SUPABASE_CONFIG || {},
         window.MeatProductionSync
       );
+      if (!options.migration && window.MeatCrossDeviceSync && bundle.record.lot_number) {
+        const reservedLot = await window.MeatCrossDeviceSync.reserveManufacturingLot(bundle.record.id, bundle.record.lot_number);
+        if (reservedLot && reservedLot !== bundle.record.lot_number) {
+          bundle.record.lot_number = reservedLot;
+          if (bundle.record.legacy_payload && typeof bundle.record.legacy_payload === "object") {
+            bundle.record.legacy_payload = { ...bundle.record.legacy_payload, lot: reservedLot };
+          }
+          record.lot = reservedLot;
+        }
+      }
+
       Object.assign(record, bundle.legacyRecordPatch);
 
       const missingIds = [];
