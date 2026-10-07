@@ -2660,13 +2660,14 @@
       return record.manufacturingRecordId || record.id;
     }
 
-    function renderManufacturingRecordHistory(records, message = "", cacheNotice = "") {
+    function renderManufacturingRecordHistory(records, message = "", cacheNotice = "", diagnostics = null) {
       const lastSync = window.MeatProductionSync ? "" : "";
       app.innerHTML = `
         <section class="section">
           <h2>製造記録履歴</h2>
           ${message ? `<div class="status">${escapeHtml(message)}</div>` : ""}
           ${cacheNotice ? `<div class="note">${escapeHtml(cacheNotice)}</div>` : ""}
+          ${diagnostics ? `<div class="note">同期診断：端末IndexedDB ${diagnostics.indexedCount}件 / 旧ローカル ${diagnostics.legacyCount}件 / 未同期 ${diagnostics.pendingCount}件 / クラウド取得 ${diagnostics.cloudCount == null ? "未確認" : diagnostics.cloudCount + "件"}${diagnostics.syncError ? ` / エラー: ${escapeHtml(diagnostics.syncError)}` : ""}</div>` : ""}
           <div class="record-actions" style="margin-bottom: 12px;">
             <button id="recordHistoryRefresh" class="secondary" type="button">最新データに更新</button>
             <span id="recordHistorySyncTime" class="status">${lastSync}</span>
@@ -2694,20 +2695,51 @@
 
     async function refreshManufacturingHistory(showResult = false) {
       let localRecords = [];
+      const legacyCount = loadManufacturingRecords().length;
       try {
         localRecords = await loadIndexedManufacturingHistory();
-        renderManufacturingRecordHistory(combinedManufacturingHistory(localRecords));
+        const pendingCount = window.MeatProductionSync ? await window.MeatProductionSync.pendingCount().catch(() => 0) : 0;
+        renderManufacturingRecordHistory(
+          combinedManufacturingHistory(localRecords),
+          "",
+          "",
+          { indexedCount: localRecords.length, legacyCount, pendingCount, cloudCount: null, syncError: "" }
+        );
       } catch (error) {
         renderManufacturingRecordHistory(loadManufacturingRecords());
       }
       try {
-        await window.MeatProductionSync.refreshHistoryCache();
+        const syncResult = await window.MeatProductionSync.refreshHistoryCache();
         const refreshed = await loadIndexedManufacturingHistory();
-        renderManufacturingRecordHistory(combinedManufacturingHistory(refreshed), showResult ? "最新データへ更新しました。" : "");
+        const pendingCount = await window.MeatProductionSync.pendingCount().catch(() => 0);
+        renderManufacturingRecordHistory(
+          combinedManufacturingHistory(refreshed),
+          showResult ? "最新データへ更新しました。" : "",
+          "",
+          {
+            indexedCount: refreshed.length,
+            legacyCount,
+            pendingCount,
+            cloudCount: syncResult && Number.isFinite(Number(syncResult.updatedCount)) ? Number(syncResult.updatedCount) : null,
+            syncError: ""
+          }
+        );
       } catch (error) {
         const cached = localRecords.length ? localRecords : await loadIndexedManufacturingHistory().catch(() => []);
         const combined = combinedManufacturingHistory(cached);
-        renderManufacturingRecordHistory(combined, "", combined.length ? "オフラインのため、この端末に保存されている製造履歴を表示しています。" : "");
+        const pendingCount = window.MeatProductionSync ? await window.MeatProductionSync.pendingCount().catch(() => 0) : 0;
+        renderManufacturingRecordHistory(
+          combined,
+          "",
+          combined.length ? "オフラインのため、この端末に保存されている製造履歴を表示しています。" : "",
+          {
+            indexedCount: cached.length,
+            legacyCount,
+            pendingCount,
+            cloudCount: null,
+            syncError: String(error && error.message ? error.message : error)
+          }
+        );
       }
     }
 
