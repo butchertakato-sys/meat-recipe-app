@@ -1158,13 +1158,70 @@
       return Array.from(records.values()).filter((record) => record.status !== "deleted").sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
     }
 
+    let crossDeviceIntegrationPromise = null;
+
+    function crossDeviceSyncStatusText() {
+      if (!window.MeatCrossDeviceSync) return "";
+      const status = window.MeatCrossDeviceSync.getStatus() || {};
+      if (status.state === "synced") {
+        const saved = status.savedRecipes || {};
+        const manufacturing = status.manufacturing || {};
+        return `端末統合：完了（レシピ${saved.total || 0}件 / 製造履歴${manufacturing.total || 0}件）`;
+      }
+      if (status.state === "conflict") {
+        const conflicts = Array.isArray(status.conflicts) ? status.conflicts : [];
+        const lots = conflicts.map((item) => item.lot || "LOT未設定").join("、");
+        return `端末統合：LOT確認が必要（${lots}）`;
+      }
+      if (status.state === "schema_required") return "端末統合：Supabase更新待ち";
+      if (status.state === "error") return `端末統合エラー：${status.error || "詳細不明"}`;
+      if (status.state === "running") return "端末統合：同期中";
+      return "端末統合：確認中";
+    }
+
+    async function runCrossDeviceIntegration() {
+      if (!window.MeatCrossDeviceSync) return null;
+      if (crossDeviceIntegrationPromise) return crossDeviceIntegrationPromise;
+      crossDeviceIntegrationPromise = (async () => {
+        await initializeManufacturingSync();
+        await initializeSupabaseMasterData();
+        window.MeatCrossDeviceSync.initialize(window.MEAT_SUPABASE_CONFIG || {});
+        const result = await window.MeatCrossDeviceSync.syncAll({
+          config: window.MEAT_SUPABASE_CONFIG || {},
+          manufacturing: {
+            loadLocal: loadManufacturingRecords,
+            saveLocal: saveManufacturingRecords,
+            uploadLocal: (record, options) => saveManufacturingRecordOfflineFirst(record, options)
+          }
+        });
+        if (result && result.state === "synced" && window.MeatProductionSync) {
+          await window.MeatProductionSync.refreshHistoryCache().catch(() => {});
+        }
+        const status = document.getElementById("crossDeviceSyncStatus");
+        if (status) status.textContent = crossDeviceSyncStatusText();
+        return result;
+      })().finally(() => {
+        crossDeviceIntegrationPromise = null;
+      });
+      return crossDeviceIntegrationPromise;
+    }
+
+    function scheduleSavedRecipeCloudSync() {
+      if (!window.MeatCrossDeviceSync) return;
+      setTimeout(() => {
+        window.MeatCrossDeviceSync.syncSavedRecipes().catch((error) => {
+          console.warn("[端末統合] 保存済みレシピ同期に失敗しました。", error);
+        });
+      }, 0);
+    }
+
     let applicationStarted = false;
 
     function startApplication() {
       if (applicationStarted) return;
       applicationStarted = true;
       initializeManufacturingSync().then((result) => refreshManufacturingSyncStatus(result.pendingCount)).catch(() => {});
-      initializeSupabaseMasterData();
+      initializeSupabaseMasterData().then(() => runCrossDeviceIntegration()).catch(() => {});
       const state = loadScreenState();
       if (state) {
         showRestorePrompt(state);
