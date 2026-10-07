@@ -1174,6 +1174,10 @@
         const lots = conflicts.map((item) => item.lot || "LOT未設定").join("、");
         return `端末統合：LOT確認が必要（${lots}）`;
       }
+      if (status.state === "partial") {
+        const manufacturing = status.manufacturing || {};
+        return `端末統合：製造履歴${manufacturing.total || 0}件を統合 / 保存済みレシピはSupabase更新待ち`;
+      }
       if (status.state === "schema_required") return "端末統合：Supabase更新待ち";
       if (status.state === "error") return `端末統合エラー：${status.error || "詳細不明"}`;
       if (status.state === "running") return "端末統合：同期中";
@@ -1190,7 +1194,24 @@
         const result = await window.MeatCrossDeviceSync.syncAll({
           config: window.MEAT_SUPABASE_CONFIG || {},
           manufacturing: {
-            loadLocal: loadManufacturingRecords,
+            loadLocal: async () => {
+              const legacy = loadManufacturingRecords();
+              const indexed = await loadIndexedManufacturingHistory().catch(() => []);
+              const merged = new Map();
+              [...legacy, ...indexed].forEach((record) => {
+                const key = record.cloudRecordId || record.manufacturingRecordId || record.id || [
+                  record.lot || "",
+                  record.prepDate || "",
+                  record.date || "",
+                  record.recipeName || record.product || ""
+                ].join("|");
+                const existing = merged.get(key);
+                if (!existing || String(record.updatedAt || record.savedAt || "").localeCompare(String(existing.updatedAt || existing.savedAt || "")) > 0) {
+                  merged.set(key, record);
+                }
+              });
+              return Array.from(merged.values());
+            },
             saveLocal: saveManufacturingRecords,
             uploadLocal: (record, options) => saveManufacturingRecordOfflineFirst(record, options)
           }
@@ -2779,6 +2800,7 @@
           ${message ? `<div class="status">${escapeHtml(message)}</div>` : ""}
           ${cacheNotice ? `<div class="note">${escapeHtml(cacheNotice)}</div>` : ""}
           ${diagnostics ? `<div class="note">同期診断：端末IndexedDB ${diagnostics.indexedCount}件 / 旧ローカル ${diagnostics.legacyCount}件 / 未同期 ${diagnostics.pendingCount}件 / クラウド取得 ${diagnostics.cloudCount == null ? "未確認" : diagnostics.cloudCount + "件"}${diagnostics.syncError ? ` / エラー: ${escapeHtml(diagnostics.syncError)}` : ""}</div>` : ""}
+          ${window.MeatCrossDeviceSync ? `<div class="note">${escapeHtml(crossDeviceSyncStatusText())}</div>` : ""}
           <div class="record-actions" style="margin-bottom: 12px;">
             <button id="recordHistoryRefresh" class="secondary" type="button">最新データに更新</button>
             <span id="recordHistorySyncTime" class="status">${lastSync}</span>
@@ -2805,6 +2827,9 @@
     }
 
     async function refreshManufacturingHistory(showResult = false) {
+      if (window.MeatCrossDeviceSync) {
+        await runCrossDeviceIntegration().catch(() => {});
+      }
       let localRecords = [];
       const legacyCount = loadManufacturingRecords().length;
       try {
