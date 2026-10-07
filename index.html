@@ -2284,9 +2284,14 @@
       return enrichSavedRecipeCalculation({ ...record, prepDate, meat6mm, meat3mm, meatTotal, emulsionWeight, rows, total, memo, updatedAt: new Date().toISOString() });
     }
 
-    function deleteSavedRecipe(savedRecipeId) {
+    async function deleteSavedRecipe(savedRecipeId) {
       if (!confirm("この保存済みレシピを削除しますか？この操作は元に戻せません。")) return;
-      const records = loadSavedRecipeCalculations().filter((record) => savedRecipeRecordId(record) !== savedRecipeId);
+      const current = loadSavedRecipeCalculations();
+      const deleting = current.find((record) => savedRecipeRecordId(record) === savedRecipeId);
+      if (deleting && window.MeatCrossDeviceSync) {
+        await window.MeatCrossDeviceSync.markSavedRecipeDeleted(deleting).catch(() => {});
+      }
+      const records = current.filter((record) => savedRecipeRecordId(record) !== savedRecipeId);
       try {
         saveSavedRecipeCalculations(records);
         showSavedRecipeList("削除しました");
