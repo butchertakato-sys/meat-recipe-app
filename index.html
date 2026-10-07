@@ -1010,13 +1010,44 @@
 
     async function saveManufacturingRecordOfflineFirst(record) {
       await initializeManufacturingSync();
-      await initializeSupabaseMasterData();
+
+      let masterResult = await initializeSupabaseMasterData();
+      if (window.MeatProductionMasterData && typeof window.MeatProductionMasterData.refresh === "function") {
+        const refreshed = await window.MeatProductionMasterData.refresh();
+        if (refreshed && refreshed.data) {
+          applySupabaseMasterData(refreshed.data);
+          masterResult = refreshed;
+        }
+      }
+
       const bundle = window.MeatProductionSyncAdapter.fromLegacy(
         record,
         window.MEAT_SUPABASE_CONFIG || {},
         window.MeatProductionSync
       );
       Object.assign(record, bundle.legacyRecordPatch);
+
+      const missingIds = [];
+      if (!bundle.record.business_id) missingIds.push("business_id");
+      if (!bundle.record.product_id) missingIds.push("product_id");
+      if (!bundle.record.recipe_id) missingIds.push("recipe_id");
+      if (!bundle.record.recipe_version_id) missingIds.push("recipe_version_id");
+      if (missingIds.length) {
+        const source = masterResult && masterResult.source ? masterResult.source : "不明";
+        const error = new Error(`Supabase同期に必要なマスタIDが不足しています（${missingIds.join(", ")} / master source: ${source}）。`);
+        const local = await window.MeatProductionSync.putBundle(bundle.record, bundle.allocations, "error", error.message);
+        record.syncStatus = "error";
+        record.syncError = error.message;
+        return {
+          localSaved: true,
+          synced: false,
+          recordId: local.record.id,
+          error,
+          record: local.record,
+          allocations: local.allocations
+        };
+      }
+
       const result = await window.MeatProductionSync.saveAndSync(bundle.record, bundle.allocations);
       record.syncStatus = result.synced ? "synced" : "error";
       record.syncError = result.error
