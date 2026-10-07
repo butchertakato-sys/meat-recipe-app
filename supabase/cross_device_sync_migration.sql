@@ -134,7 +134,7 @@ security definer
 set search_path = public
 as $$
 declare
-  record_id uuid := (record_data->>'id')::uuid;
+  target_record_id uuid := (record_data->>'id')::uuid;
   target_business_id uuid := (record_data->>'business_id')::uuid;
   requested_lot text := record_data->>'lot_number';
 begin
@@ -164,7 +164,7 @@ begin
      where mr.business_id = target_business_id
        and mr.lot_number = requested_lot
        and mr.status = 'active'
-       and mr.id <> record_id
+       and mr.id <> target_record_id
   ) then
     raise exception 'LOT_CONFLICT:%', requested_lot;
   end if;
@@ -188,7 +188,7 @@ begin
     completed_weight_g, yield_rate, loss_weight_g, remainder_weight_g, memo,
     legacy_payload, status, created_by, created_at, updated_at
   ) values (
-    record_id, target_business_id, (record_data->>'product_id')::uuid,
+    target_record_id, target_business_id, (record_data->>'product_id')::uuid,
     (record_data->>'recipe_id')::uuid, (record_data->>'recipe_version_id')::uuid,
     (record_data->>'prep_date')::date, (record_data->>'manufacturing_date')::date,
     requested_lot, record_data->>'manufacturing_type',
@@ -226,7 +226,7 @@ begin
   end if;
 
   delete from public.manufacturing_allocations
-  where manufacturing_record_id = record_id and business_id = target_business_id;
+  where manufacturing_record_id = target_record_id and business_id = target_business_id;
 
   insert into public.manufacturing_allocations (
     id, manufacturing_record_id, business_id, allocation_type, packaging_master_id,
@@ -234,7 +234,7 @@ begin
     calculated_weight_g, count_as_completed_weight, count_as_loss,
     allocation_code, notes, created_at, updated_at
   )
-  select x.id, record_id, target_business_id, x.allocation_type,
+  select x.id, target_record_id, target_business_id, x.allocation_type,
     x.packaging_master_id, x.packaging_version_id, x.quantity, x.quantity_unit,
     x.unit_weight_g, x.calculated_weight_g, x.count_as_completed_weight,
     x.count_as_loss, x.allocation_code, x.notes,
@@ -248,9 +248,9 @@ begin
   );
 
   delete from public.manufacturing_lot_reservations
-   where business_id = target_business_id and record_id = save_manufacturing_record.record_id;
+   where business_id = target_business_id and record_id = target_record_id;
 
-  return record_id;
+  return target_record_id;
 end $$;
 
 revoke all on function public.save_manufacturing_record(jsonb, jsonb) from public;
@@ -318,7 +318,7 @@ begin
      where mr.business_id = target_business_id
        and mr.lot_number = requested_lot
        and mr.status = 'active'
-       and mr.id <> record_id
+       and mr.id <> target_record_id
   ) then
     raise exception 'LOT_CONFLICT:%', requested_lot;
   end if;
@@ -473,7 +473,7 @@ begin
      where mr.business_id = target_business_id
        and mr.lot_number = requested_lot
        and mr.status = 'active'
-       and mr.id <> record_id
+       and mr.id <> target_record_id
   ) then
     raise exception 'LOT_CONFLICT:%', requested_lot;
   end if;
