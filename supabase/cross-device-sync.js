@@ -5,6 +5,7 @@
   const OLD_SAVED_KEY = "meatRecipeApp.savedRecipeCalculations.v1";
   const DEVICE_KEY = "meatRecipeApp.deviceId.v1";
   const STATUS_KEY = "meatRecipeApp.crossDeviceSyncStatus.v1";
+  const DELETED_SAVED_QUEUE_KEY = "meatRecipeApp.deletedSavedRecipes.v1";
 
   let currentConfig = null;
 
@@ -172,7 +173,33 @@
     return Array.isArray(result) ? result[0] : result;
   }
 
+  function readDeletedSavedQueue() {
+    try {
+      const value = JSON.parse(global.localStorage.getItem(DELETED_SAVED_QUEUE_KEY) || "[]");
+      return Array.isArray(value) ? value : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function writeDeletedSavedQueue(rows) {
+    try { global.localStorage.setItem(DELETED_SAVED_QUEUE_KEY, JSON.stringify(rows || [])); } catch (_) {}
+  }
+
+  async function flushDeletedSavedQueue() {
+    const queue = readDeletedSavedQueue();
+    if (!queue.length) return { attempted: 0, remaining: 0 };
+    const remaining = [];
+    for (const row of queue) {
+      try { await upsertSavedRecipe(row); }
+      catch (_) { remaining.push(row); }
+    }
+    writeDeletedSavedQueue(remaining);
+    return { attempted: queue.length, remaining: remaining.length };
+  }
+
   async function syncSavedRecipes() {
+    await flushDeletedSavedQueue();
     const local = localSavedRecipes();
     const cloudRows = await fetchCloudSavedRecipes();
     const cloudById = new Map(cloudRows.map((row) => [row.id, row]));
@@ -233,7 +260,10 @@
       await upsertSavedRecipe(row);
       return { synced: true };
     } catch (error) {
-      return { synced: false, error };
+      const queue = readDeletedSavedQueue().filter((item) => item.id !== row.id);
+      queue.push(row);
+      writeDeletedSavedQueue(queue);
+      return { synced: false, queued: true, error };
     }
   }
 
