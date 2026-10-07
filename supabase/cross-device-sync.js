@@ -237,6 +237,27 @@
     }
   }
 
+  async function reserveManufacturingLot(recordId, lotNumber) {
+    const raw = String(lotNumber || "").trim();
+    const match = raw.match(/^(.*)-([0-9]+)$/);
+    const lotBase = match ? match[1] : raw;
+    if (!lotBase || !recordId) return raw;
+    try {
+      const result = await request("rpc/reserve_manufacturing_lot", {
+        method: "POST",
+        body: JSON.stringify({
+          target_business_id: currentConfig.businessId,
+          lot_base: lotBase,
+          target_record_id: recordId
+        })
+      });
+      return typeof result === "string" ? result : raw;
+    } catch (error) {
+      console.warn("[端末統合] LOT予約に失敗したため端末採番を使用します。", error);
+      return raw;
+    }
+  }
+
   async function fetchCloudManufacturingRecords() {
     const select = "*,product:products(display_name,internal_code),recipe:recipes(display_name,internal_code),manufacturing_allocations(*)";
     const params = new URLSearchParams({
@@ -399,6 +420,7 @@
     syncSavedRecipes,
     markSavedRecipeDeleted,
     fetchCloudManufacturingRecords,
+    reserveManufacturingLot,
     getStatus,
     statusKey: STATUS_KEY
   };
