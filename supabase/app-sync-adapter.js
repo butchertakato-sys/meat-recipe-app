@@ -153,6 +153,19 @@
     if (record.togeAllocationEnabled) add("TOUGE", record.togePieceCount, "piece", 35, true, false, "TOUGE_STANDARD");
     const lossCount = number(record.lossCount);
     if (lossCount > 0) add("LOSS", lossCount, "piece", 0, false, true, `${code}_STANDARD`);
+
+    result.push(allocation(recordId, businessId, {
+      allocation_type: "LEGACY_META",
+      packaging_master_id: null,
+      packaging_version_id: null,
+      quantity: 0,
+      quantity_unit: "meta",
+      unit_weight_g: 0,
+      calculated_weight_g: 0,
+      count_as_completed_weight: false,
+      count_as_loss: false,
+      notes: JSON.stringify(legacyRecoveryPayload(record))
+    }, syncApi));
     return result;
   }
 
