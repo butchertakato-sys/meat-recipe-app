@@ -383,7 +383,23 @@
         continue;
       }
 
-      if (record.cloudRecordId && cloud.some((row) => row.id === record.cloudRecordId)) continue;
+      if (record.cloudRecordId) {
+        const linkedCloud = cloud.find((row) => row.id === record.cloudRecordId);
+        if (linkedCloud) {
+          if (hasRecoverableLegacyData(record) && !cloudHasLegacyMeta(linkedCloud)) {
+            const recoveryResult = await uploadLocal(record, { migration: true, preserveLot: true, recovery: true });
+            if (recoveryResult && recoveryResult.synced) uploaded += 1;
+            else {
+              local[index] = {
+                ...record,
+                syncStatus: "error",
+                syncError: recoveryResult && recoveryResult.error ? String(recoveryResult.error.message || recoveryResult.error) : "過去履歴の復旧同期に失敗しました"
+              };
+            }
+          }
+          continue;
+        }
+      }
 
       const matches = byLot.get(lot) || [];
       if (matches.length) {
