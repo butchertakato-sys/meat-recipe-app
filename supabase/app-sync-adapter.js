@@ -85,6 +85,36 @@
     };
   }
 
+  function legacyRecoveryPayload(record) {
+    return {
+      prepDate: record.prepDate, date: record.date, category: record.category,
+      recipeId: record.recipeId, productId: record.productId, recipeName: record.recipeName,
+      savedRecipeName: record.savedRecipeName, recipeCode: record.recipeCode,
+      packagingKey: record.packagingKey, packagingUnit: record.packagingUnit,
+      packageCountLabel: record.packageCountLabel, recipeKind: record.recipeKind,
+      lot: record.lot, memo: record.memo, savedRecipeId: record.savedRecipeId,
+      meat6mm: record.meat6mm, meat3mm: record.meat3mm, meatTotal: record.meatTotal,
+      waterAmount: record.waterAmount, emulsionWeight: record.emulsionWeight,
+      totalWeight: record.totalWeight, theoreticalFinishedWeight: record.theoreticalFinishedWeight,
+      recipeRows: record.recipeRows, recipeTotal: record.recipeTotal,
+      packageCount: record.packageCount, completedCount: record.completedCount,
+      herbStandardPackageCount: record.herbStandardPackageCount,
+      herbEventPieceCount: record.herbEventPieceCount,
+      smokedCount: record.smokedCount, unsmokedCount: record.unsmokedCount,
+      lossCount: record.lossCount, leftoverWeight: record.leftoverWeight,
+      packWeight: record.packWeight, packPieces: record.packPieces,
+      unitWeight: record.unitWeight, unitPieces: record.unitPieces,
+      togeAllocationEnabled: record.togeAllocationEnabled,
+      togeAllocationId: record.togeAllocationId, togePieceCount: record.togePieceCount,
+      togeAllocatedWeight: record.togeAllocatedWeight, togeComponentType: record.togeComponentType,
+      finishedWeight: record.finishedWeight, yieldRate: record.yieldRate,
+      savedUnitWeightG: record.savedUnitWeightG,
+      actualFinishedWeightG: record.actualFinishedWeightG,
+      actualYieldPercent: record.actualYieldPercent,
+      createdAt: record.createdAt, updatedAt: record.updatedAt, savedAt: record.savedAt
+    };
+  }
+
   function allocationsFromLegacy(record, recordId, code, config, syncApi) {
     const businessId = config.businessId || null;
     const result = [];
