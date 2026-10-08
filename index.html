@@ -1186,7 +1186,7 @@
       const productName = cloud.product && cloud.product.display_name ? cloud.product.display_name : "";
       const recipeName = cloud.recipe && cloud.recipe.display_name ? cloud.recipe.display_name : productName;
       const packagingUnit = legacy.packagingUnit || (standard && standard.quantity_unit === "piece" ? "本" : "袋");
-      return {
+      const restored = {
         ...legacy,
         id: cloud.id,
         manufacturingRecordId: cloud.id,
@@ -1220,6 +1220,7 @@
         syncStatus: cloud.sync_status || "synced",
         updatedAt: cloud.updated_at || legacy.updatedAt || ""
       };
+      return recoverManufacturingFromSavedRecipe(restored);
     }
 
     async function loadIndexedManufacturingHistory() {
@@ -1321,15 +1322,16 @@
               const indexed = await loadIndexedManufacturingHistory().catch(() => []);
               const merged = new Map();
               [...legacy, ...indexed].forEach((record) => {
-                const lot = String(record.lot || "").trim();
+                const recoveredRecord = recoverManufacturingFromSavedRecipe(record);
+                const lot = String(recoveredRecord.lot || "").trim();
                 const key = lot
                   ? `lot:${lot}`
-                  : `id:${record.cloudRecordId || record.manufacturingRecordId || record.id || [
-                      record.prepDate || "",
-                      record.date || "",
-                      record.recipeName || record.product || ""
+                  : `id:${recoveredRecord.cloudRecordId || recoveredRecord.manufacturingRecordId || recoveredRecord.id || [
+                      recoveredRecord.prepDate || "",
+                      recoveredRecord.date || "",
+                      recoveredRecord.recipeName || recoveredRecord.product || ""
                     ].join("|")}`;
-                merged.set(key, mergeManufacturingRecoveryRecords(merged.get(key), record));
+                merged.set(key, mergeManufacturingRecoveryRecords(merged.get(key), recoveredRecord));
               });
               return Array.from(merged.values());
             },
@@ -2238,6 +2240,91 @@
         item.category === category &&
         item.recipeName === recipeName
       ));
+    }
+
+    function findRecoverySavedRecipe(record) {
+      const saved = loadSavedRecipeCalculations();
+      const directId = record && (record.savedRecipeId || record.savedCalculationId);
+      if (directId) {
+        const byId = saved.find((item) => savedRecipeRecordId(item) === directId);
+        if (byId) return byId;
+      }
+      if (!record) return null;
+      const recipeName = String(record.savedRecipeName || record.recipeName || "").replace(/（.*$/, "");
+      const candidates = saved.filter((item) => (
+        item.prepDate === record.prepDate &&
+        (!record.category || item.category === record.category) &&
+        String(item.savedRecipeName || item.recipeName || "").replace(/（.*$/, "") === recipeName
+      ));
+      return candidates.length === 1 ? candidates[0] : null;
+    }
+
+    function recoverManufacturingFromSavedRecipe(record) {
+      if (!record) return record;
+      const saved = findRecoverySavedRecipe(record);
+      if (!saved) return record;
+
+      const option = recordOptionForSavedRecipe(saved);
+      const packagingSpec = option ? packagingSpecForRecordOption(option) : null;
+      const recovered = { ...record };
+      const fillNumber = (key, sourceValue) => {
+        if (!(Number(recovered[key] || 0) > 0) && Number(sourceValue || 0) > 0) recovered[key] = Number(sourceValue);
+      };
+      const fillValue = (key, sourceValue) => {
+        if ((recovered[key] == null || recovered[key] === "") && sourceValue != null && sourceValue !== "") recovered[key] = sourceValue;
+      };
+
+      fillNumber("meat6mm", saved.meat6mm);
+      fillNumber("meat3mm", saved.meat3mm);
+      fillNumber("meatTotal", saved.meatTotal);
+      fillNumber("waterAmount", saved.waterAmount);
+      fillNumber("emulsionWeight", saved.emulsionWeight);
+      fillNumber("totalWeight", saved.totalWeight);
+      fillNumber("theoreticalFinishedWeight", saved.theoreticalFinishedWeight || saved.totalWeight);
+      fillNumber("recipeTotal", saved.total);
+      if ((!Array.isArray(recovered.recipeRows) || !recovered.recipeRows.length) && Array.isArray(saved.rows) && saved.rows.length) {
+        recovered.recipeRows = saved.rows;
+      }
+      fillValue("savedRecipeId", savedRecipeRecordId(saved));
+      fillValue("savedCalculationId", savedRecipeRecordId(saved));
+      fillValue("savedRecipeName", saved.savedRecipeName || saved.recipeName);
+      fillValue("recipeName", saved.recipeName);
+      fillValue("recipeId", option && option.id);
+      fillValue("productId", option && packagingProductIdForOption(option));
+      fillValue("packagingKey", saved.packagingKey || (option && option.packagingKey));
+      fillValue("recipeCode", saved.recipeCode || (option && recipeCodeForRecipe(option.recipe)));
+      fillValue("recipeKind", saved.recipeKind || (option && option.recipe && option.recipe.kind));
+      if ((!recovered.packagingUnit || recovered.packagingUnit === "袋") && packagingSpec && packagingSpec.unit) {
+        recovered.packagingUnit = packagingSpec.unit;
+      }
+      if (!(Number(recovered.savedUnitWeightG || 0) > 0) && packagingSpec && Number(packagingSpec.unitWeight || 0) > 0) {
+        recovered.savedUnitWeightG = Number(packagingSpec.unitWeight);
+        recovered.unitWeight = Number(packagingSpec.unitWeight);
+        recovered.packWeight = Number(packagingSpec.unitWeight);
+      }
+
+      const theoretical = Number(recovered.theoreticalFinishedWeight || recovered.totalWeight || 0);
+      let completedWeight = Number(recovered.actualFinishedWeightG || recovered.finishedWeight || 0);
+      const yieldRate = Number(recovered.actualYieldPercent != null ? recovered.actualYieldPercent : recovered.yieldRate);
+      if (!(completedWeight > 0) && theoretical > 0 && yieldRate > 0) {
+        completedWeight = theoretical * yieldRate / 100;
+        recovered.actualFinishedWeightG = completedWeight;
+        recovered.finishedWeight = completedWeight;
+      }
+
+      const isHerb = isCombinedHerbManufacturingRecord(recovered);
+      const isGibier = isGibierManufacturingRecord(recovered);
+      const currentCount = Number(recovered.packagingUnit === "本" ? recovered.completedCount : recovered.packageCount);
+      if (!isHerb && !isGibier && !(currentCount > 0) && completedWeight > 0 && packagingSpec && Number(packagingSpec.unitWeight || 0) > 0) {
+        const inferred = completedWeight / Number(packagingSpec.unitWeight);
+        const rounded = Math.round(inferred);
+        if (Math.abs(inferred - rounded) <= 0.08) {
+          if (packagingSpec.unit === "本") recovered.completedCount = String(rounded);
+          else recovered.packageCount = String(rounded);
+        }
+      }
+      recovered.recoverySource = "saved-recipe";
+      return recovered;
     }
 
     function generateManufacturingLot(dateString, category, recipe, packagingKey = "") {
