@@ -350,7 +350,14 @@
   }
 
   function shouldRepublishRecovery(record, cloudRow) {
-    return recoveryDataScore(record) > recoveryDataScore(cloudLegacyMetaPayload(cloudRow));
+    const remote = global.MeatHistoryRecovery.fromBundle({ record: cloudRow, allocations: cloudRow.manufacturing_allocations });
+    const fields = ["meat6mm", "meat3mm", "meatTotal", "waterAmount", "emulsionWeight", "recipeRows", "recipeTotal", "totalWeight", "theoreticalFinishedWeight", "packageCount", "completedCount", "herbStandardPackageCount", "herbEventPieceCount", "smokedCount", "unsmokedCount", "lossCount", "leftoverWeight", "memo", "savedRecipeId"];
+    return fields.some((key) => {
+      const value = record[key];
+      if (value == null || value === "" || (Array.isArray(value) && !value.length)) return false;
+      if (typeof value === "number" || (key.endsWith("Count") && !Number.isNaN(Number(value)))) return Number(value) !== Number(remote[key]);
+      return JSON.stringify(value) !== JSON.stringify(remote[key]);
+    });
   }
 
   function cloudLotMap(rows) {
@@ -381,19 +388,48 @@
     let merged = 0;
 
     for (let index = 0; index < local.length; index += 1) {
-      const record = local[index];
+      const original = local[index];
+      if (original.recoveryConflict && original.recoveryConflict.length > 1) {
+        conflicts.push({ type: "LOT_CONFLICT", lot: original.lot, cloudRecordIds: original.recoveryConflict });
+        continue;
+      }
+      const originalMatches = byLot.get(String(original.lot || "").trim()) || [];
+      if (original.cloudRecordId && originalMatches.some((r) => r.id !== original.cloudRecordId)) {
+        conflicts.push({ type: "LOT_CONFLICT", lot: original.lot, cloudRecordIds: originalMatches.map((r) => r.id) });
+        continue;
+      }
+      const localCode = global.MeatProductionSyncAdapter.internalCode(original);
+      const incompatible = originalMatches.some((row) => {
+        const code = global.MeatProductionSyncAdapter.internalCode(global.MeatHistoryRecovery.fromBundle({ record: row, allocations: row.manufacturing_allocations }));
+        return localCode !== "UNKNOWN" && code !== "UNKNOWN" && localCode !== code;
+      });
+      if (incompatible) {
+        conflicts.push({ type: "LOT_CONFLICT", lot: original.lot, cloudRecordIds: originalMatches.map((r) => r.id) });
+        continue;
+      }
+      const record = options.recoverRecord ? options.recoverRecord(original, cloud) : original;
+      local[index] = record;
       const lot = String(record.lot || "").trim();
       if (!lot) {
         conflicts.push({ type: "LOT_MISSING", lot: "", recipeName: record.recipeName || record.product || "", date: record.date || record.prepDate || "" });
         continue;
       }
 
+      const lotMatches = byLot.get(lot) || [];
+      if (lotMatches.length > 1 || (record.cloudRecordId && lotMatches.some((r) => r.id !== record.cloudRecordId))) {
+        conflicts.push({ type: "LOT_CONFLICT", lot, cloudRecordIds: lotMatches.map((r) => r.id) });
+        continue;
+      }
       if (record.cloudRecordId) {
         const linkedCloud = cloud.find((row) => row.id === record.cloudRecordId);
         if (linkedCloud) {
-          if (shouldRepublishRecovery(record, linkedCloud)) {
+          if (record.syncStatus === "error" || record.syncStatus === "pending" || shouldRepublishRecovery(record, linkedCloud)) {
             const recoveryResult = await uploadLocal(record, { migration: true, preserveLot: true, recovery: true });
-            if (recoveryResult && recoveryResult.synced) uploaded += 1;
+            if (recoveryResult && recoveryResult.synced) {
+              record.syncStatus = "synced";
+              record.syncError = "";
+              uploaded += 1;
+            }
             else {
               local[index] = {
                 ...record,
@@ -466,7 +502,7 @@
     }
 
     saveLocal(local);
-    return { total: local.length, uploaded, merged, conflicts, cloudCount: cloud.length };
+    return { total: local.length, uploaded, merged, conflicts, errors: local.filter((r) => r.syncStatus === "error").length, cloudCount: cloud.length };
   }
 
   async function syncAll(options = {}) {
@@ -488,11 +524,11 @@
       const conflicts = manufacturing ? manufacturing.conflicts : [];
       const state = conflicts.length
         ? "conflict"
-        : (savedRecipeSchemaReady ? "synced" : "partial");
+        : (manufacturing && manufacturing.errors ? "error" : (savedRecipeSchemaReady ? "synced" : "partial"));
 
       return setStatus({
         state,
-        error: savedRecipeSchemaReady ? "" : "保存済みレシピ用のSupabaseテーブルが未適用です。製造記録の統合は継続します。",
+        error: manufacturing && manufacturing.errors ? `製造履歴${manufacturing.errors}件の同期が保留されています。` : savedRecipeSchemaReady ? "" : "保存済みレシピ用のSupabaseテーブルが未適用です。製造記録の統合は継続します。",
         conflicts,
         savedRecipes,
         savedRecipeSchemaReady,

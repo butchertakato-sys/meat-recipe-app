@@ -625,6 +625,7 @@
   <script src="supabase/auth.js"></script>
   <script src="supabase/master-data.js"></script>
   <script src="supabase/offline-sync.js"></script>
+  <script src="supabase/history-recovery.js"></script>
   <script src="supabase/app-sync-adapter.js"></script>
   <script src="supabase/cross-device-sync.js"></script>
   <script>
@@ -1011,7 +1012,7 @@
     function initializeManufacturingSync() {
       if (!window.MeatProductionSync) return Promise.reject(new Error("端末保存機能を読み込めません。"));
       if (!manufacturingSyncInitialization) {
-        manufacturingSyncInitialization = window.MeatProductionSync.initialize(window.MEAT_SUPABASE_CONFIG || {});
+        manufacturingSyncInitialization = window.MeatProductionSync.initialize({ ...(window.MEAT_SUPABASE_CONFIG || {}), preparePending: prepareManufacturingRecovery });
       }
       return manufacturingSyncInitialization;
     }
@@ -1173,69 +1174,52 @@
     const manufacturingIndexedHistory = new Map();
 
     function cachedBundleToManufacturingRecord(bundle) {
-      const cloud = bundle.record || {};
-      const allocations = bundle.allocations || [];
-      const allocation = (type) => allocations.find((item) => item.allocation_type === type);
-      const recoveryMeta = allocation("LEGACY_META");
-      let recoveryPayload = {};
-      if (recoveryMeta && recoveryMeta.notes) {
-        try {
-          const parsed = JSON.parse(recoveryMeta.notes);
-          if (parsed && typeof parsed === "object") recoveryPayload = parsed;
-        } catch (_) {}
+      return recoverManufacturingFromSavedRecipe(window.MeatHistoryRecovery.fromBundle(bundle));
+    }
+
+    function manufacturingRecoverySources(indexedRecords = [], cloudRows = []) {
+      return [
+        ...readLegacyStorageArray(OLD_MANUFACTURING_RECORDS_KEY).map((record) => ({ source: "archive", record })),
+        ...readLegacyStorageArray(MANUFACTURING_RECORDS_KEY).map((record) => ({ source: "local", record })),
+        ...indexedRecords.map((record) => ({ source: "indexed", record })),
+        ...cloudRows.map((row) => ({ source: "cloud", record: window.MeatHistoryRecovery.fromBundle({ record: row, allocations: row.manufacturing_allocations }) }))
+      ];
+    }
+
+    function canonicalManufacturingHistory(indexedRecords = [], cloudRows = []) {
+      const saved = [...readLegacyStorageArray(OLD_SAVED_RECIPE_CALCULATIONS_KEY), ...loadSavedRecipeCalculations()];
+      return window.MeatHistoryRecovery.mergeHistory(manufacturingRecoverySources(indexedRecords, cloudRows), saved)
+        .map(recoverManufacturingFromSavedRecipe);
+    }
+
+    async function prepareManufacturingRecovery(pendingBundles) {
+      await initializeSupabaseMasterData();
+      if (window.MeatProductionMasterData && window.MeatProductionMasterData.refresh) {
+        const result = await window.MeatProductionMasterData.refresh();
+        if (result && result.data) applySupabaseMasterData(result.data);
       }
-      const cloudLegacy = cloud.legacy_payload && typeof cloud.legacy_payload === "object" ? cloud.legacy_payload : {};
-      const legacy = { ...recoveryPayload, ...cloudLegacy };
-      const standard = allocation("STANDARD");
-      const herbStandard = allocation("HERB_STANDARD");
-      const herbEvent = allocation("HERB_EVENT");
-      const gibierSmoked = allocation("GIBIER_SMOKED");
-      const gibierUnsmoked = allocation("GIBIER_UNSMOKED");
-      const loss = allocation("LOSS");
-      const toge = allocation("TOUGE");
-      const productName = cloud.product && cloud.product.display_name ? cloud.product.display_name : "";
-      const recipeName = cloud.recipe && cloud.recipe.display_name ? cloud.recipe.display_name : productName;
-      const packagingUnit = legacy.packagingUnit || (standard && standard.quantity_unit === "piece" ? "本" : "袋");
-      const restored = {
-        ...legacy,
-        id: cloud.id,
-        manufacturingRecordId: cloud.id,
-        cloudRecordId: cloud.id,
-        prepDate: cloud.prep_date || legacy.prepDate || "",
-        date: cloud.manufacturing_date || legacy.date || "",
-        lot: cloud.lot_number || legacy.lot || "",
-        category: legacy.category || (cloud.manufacturing_type === "own" ? "自社レシピ" : "委託製造"),
-        recipeName: legacy.recipeName || recipeName || "レシピ未設定",
-        product: legacy.product || productName || recipeName,
-        cloudProductId: cloud.product_id || legacy.cloudProductId || "",
-        cloudRecipeId: cloud.recipe_id || legacy.cloudRecipeId || "",
-        cloudRecipeVersionId: cloud.recipe_version_id || legacy.cloudRecipeVersionId || "",
-        productInternalCode: (cloud.product && cloud.product.internal_code) || legacy.productInternalCode || "",
-        recipeInternalCode: (cloud.recipe && cloud.recipe.internal_code) || legacy.recipeInternalCode || "",
-        theoreticalFinishedWeight: Number(cloud.theoretical_weight_g != null ? cloud.theoretical_weight_g : legacy.theoreticalFinishedWeight || 0),
-        finishedWeight: Number(cloud.completed_weight_g != null ? cloud.completed_weight_g : legacy.finishedWeight || 0),
-        actualFinishedWeightG: Number(cloud.completed_weight_g != null ? cloud.completed_weight_g : legacy.actualFinishedWeightG || 0),
-        yieldRate: cloud.yield_rate == null ? legacy.yieldRate : Number(cloud.yield_rate),
-        actualYieldPercent: cloud.yield_rate == null ? legacy.actualYieldPercent : Number(cloud.yield_rate),
-        leftoverWeight: cloud.remainder_weight_g != null ? String(cloud.remainder_weight_g) : (legacy.leftoverWeight || "0"),
-        memo: cloud.memo != null ? cloud.memo : (legacy.memo || ""),
-        packagingUnit,
-        packageCount: legacy.packageCount != null ? legacy.packageCount : (standard && standard.quantity_unit === "package" ? String(standard.quantity) : ""),
-        completedCount: legacy.completedCount != null ? legacy.completedCount : (standard && standard.quantity_unit === "piece" ? String(standard.quantity) : String(Number(gibierSmoked && gibierSmoked.quantity || 0) + Number(gibierUnsmoked && gibierUnsmoked.quantity || 0))),
-        herbStandardPackageCount: legacy.herbStandardPackageCount != null ? legacy.herbStandardPackageCount : Number(herbStandard && herbStandard.quantity || 0),
-        herbEventPieceCount: legacy.herbEventPieceCount != null ? legacy.herbEventPieceCount : Number(herbEvent && herbEvent.quantity || 0),
-        smokedCount: legacy.smokedCount != null ? legacy.smokedCount : Number(gibierSmoked && gibierSmoked.quantity || 0),
-        unsmokedCount: legacy.unsmokedCount != null ? legacy.unsmokedCount : Number(gibierUnsmoked && gibierUnsmoked.quantity || 0),
-        lossCount: legacy.lossCount != null ? legacy.lossCount : Number(loss && loss.quantity || 0),
-        togeAllocationEnabled: legacy.togeAllocationEnabled != null ? legacy.togeAllocationEnabled : Boolean(toge),
-        togeAllocationId: legacy.togeAllocationId || (toge && toge.allocation_code) || "",
-        togePieceCount: legacy.togePieceCount != null ? legacy.togePieceCount : Number(toge && toge.quantity || 0),
-        togeAllocatedWeight: legacy.togeAllocatedWeight != null ? legacy.togeAllocatedWeight : Number(toge && toge.calculated_weight_g || 0),
-        status: cloud.status || legacy.status || "active",
-        syncStatus: cloud.sync_status || "synced",
-        updatedAt: cloud.updated_at || legacy.updatedAt || ""
-      };
-      return recoverManufacturingFromSavedRecipe(restored);
+      const all = await window.MeatProductionSync.getLocalHistory();
+      const cloud = await window.MeatProductionSync.fetchCloudHistory().catch(() => []);
+      const canonical = canonicalManufacturingHistory(all.map(cachedBundleToManufacturingRecord), cloud);
+      const recordForPending = (old) => canonical.find((r) => r.cloudRecordId === old.record.id || (old.record.lot_number && r.lot === old.record.lot_number)) || cachedBundleToManufacturingRecord(old);
+      return pendingBundles.map((old) => {
+        const lot = old.record.lot_number;
+        const matches = cloud.filter((r) => r.lot_number === lot && r.status !== "deleted");
+        const localIds = new Set(all.filter((b) => b.record.lot_number === lot && b.record.status !== "deleted").map((b) => b.record.id));
+        const code = window.MeatProductionSyncAdapter.internalCode(recordForPending(old));
+        const incompatible = matches.some((r) => {
+          const remoteCode = window.MeatProductionSyncAdapter.internalCode(window.MeatHistoryRecovery.fromBundle({ record: r, allocations: r.manufacturing_allocations }));
+          return code !== "UNKNOWN" && remoteCode !== "UNKNOWN" && code !== remoteCode;
+        });
+        if (recordForPending(old).recoveryConflict || matches.length > 1 || localIds.size > 1 || incompatible || (matches.length === 1 && matches[0].id !== old.record.id)) {
+          return { ...old, recoveryError: `LOT競合：${lot}（自動変更しません）` };
+        }
+        const record = canonical.find((r) => r.cloudRecordId === old.record.id || (lot && r.lot === lot));
+        if (!record) return { ...old, recoveryError: "復旧元の製造記録が見つかりません" };
+        // Retain the existing cache/cloud identity and LOT, including deleted records.
+        const rebuilt = window.MeatProductionSyncAdapter.fromLegacy({ ...record, cloudRecordId: old.record.id, lot, status: old.record.status }, window.MEAT_SUPABASE_CONFIG || {}, window.MeatProductionSync);
+        return rebuilt;
+      });
     }
 
     async function loadIndexedManufacturingHistory() {
@@ -1250,13 +1234,10 @@
     }
 
     function combinedManufacturingHistory(indexedRecords = []) {
-      const records = new Map(indexedRecords.map((record) => [manufacturingRecordId(record), record]));
-      loadManufacturingRecords().forEach((record) => {
-        const id = manufacturingRecordId(record);
-        const cached = records.get(id);
-        if (!cached || cached.syncStatus === "pending" || cached.syncStatus === "error") records.set(id, cached || record);
-      });
-      return Array.from(records.values()).filter((record) => record.status !== "deleted").sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+      const records = canonicalManufacturingHistory(indexedRecords).filter((record) => record.status !== "deleted");
+      manufacturingIndexedHistory.clear();
+      records.forEach((record) => manufacturingIndexedHistory.set(manufacturingRecordId(record), record));
+      return records.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
     }
 
     let crossDeviceIntegrationPromise = null;
@@ -1300,28 +1281,6 @@
       return score;
     }
 
-    function mergeManufacturingRecoveryRecords(first, second) {
-      if (!first) return { ...second };
-      if (!second) return { ...first };
-      const firstScore = manufacturingRecoveryScore(first);
-      const secondScore = manufacturingRecoveryScore(second);
-      const rich = secondScore > firstScore ? second : first;
-      const other = rich === first ? second : first;
-      const cloudId = first.cloudRecordId || second.cloudRecordId || "";
-      return {
-        ...other,
-        ...rich,
-        id: cloudId || rich.id || other.id,
-        manufacturingRecordId: cloudId || rich.manufacturingRecordId || other.manufacturingRecordId || rich.id || other.id,
-        cloudRecordId: cloudId,
-        lot: rich.lot || other.lot || "",
-        prepDate: rich.prepDate || other.prepDate || "",
-        date: rich.date || other.date || "",
-        recipeName: rich.recipeName || other.recipeName || "",
-        product: rich.product || other.product || ""
-      };
-    }
-
     async function runCrossDeviceIntegration() {
       if (!window.MeatCrossDeviceSync) return null;
       if (crossDeviceIntegrationPromise) return crossDeviceIntegrationPromise;
@@ -1332,25 +1291,8 @@
         const result = await window.MeatCrossDeviceSync.syncAll({
           config: window.MEAT_SUPABASE_CONFIG || {},
           manufacturing: {
-            loadLocal: async () => {
-              const legacy = loadManufacturingRecords();
-              const legacyArchive = readLegacyStorageArray(OLD_MANUFACTURING_RECORDS_KEY);
-              const indexed = await loadIndexedManufacturingHistory().catch(() => []);
-              const merged = new Map();
-              [...legacyArchive, ...legacy, ...indexed].forEach((record) => {
-                const recoveredRecord = recoverManufacturingFromSavedRecipe(record);
-                const lot = String(recoveredRecord.lot || "").trim();
-                const key = lot
-                  ? `lot:${lot}`
-                  : `id:${recoveredRecord.cloudRecordId || recoveredRecord.manufacturingRecordId || recoveredRecord.id || [
-                      recoveredRecord.prepDate || "",
-                      recoveredRecord.date || "",
-                      recoveredRecord.recipeName || recoveredRecord.product || ""
-                    ].join("|")}`;
-                merged.set(key, mergeManufacturingRecoveryRecords(merged.get(key), recoveredRecord));
-              });
-              return Array.from(merged.values());
-            },
+            loadLocal: async () => canonicalManufacturingHistory(await loadIndexedManufacturingHistory()),
+            recoverRecord: (record, cloudRows) => canonicalManufacturingHistory([record], cloudRows).find((r) => r.lot === record.lot) || record,
             saveLocal: saveManufacturingRecords,
             uploadLocal: (record, options) => saveManufacturingRecordOfflineFirst(record, options)
           }
@@ -2286,69 +2228,19 @@
     function recoverManufacturingFromSavedRecipe(record) {
       if (!record) return record;
       const saved = findRecoverySavedRecipe(record);
-      if (!saved) return record;
-
-      const option = recordOptionForSavedRecipe(saved);
-      const packagingSpec = option ? packagingSpecForRecordOption(option) : null;
-      const recovered = { ...record };
-      const fillNumber = (key, sourceValue) => {
-        if (!(Number(recovered[key] || 0) > 0) && Number(sourceValue || 0) > 0) recovered[key] = Number(sourceValue);
-      };
-      const fillValue = (key, sourceValue) => {
-        if ((recovered[key] == null || recovered[key] === "") && sourceValue != null && sourceValue !== "") recovered[key] = sourceValue;
-      };
-
-      fillNumber("meat6mm", saved.meat6mm);
-      fillNumber("meat3mm", saved.meat3mm);
-      fillNumber("meatTotal", saved.meatTotal);
-      fillNumber("waterAmount", saved.waterAmount);
-      fillNumber("emulsionWeight", saved.emulsionWeight);
-      fillNumber("totalWeight", saved.totalWeight);
-      fillNumber("theoreticalFinishedWeight", saved.theoreticalFinishedWeight || saved.totalWeight);
-      fillNumber("recipeTotal", saved.total);
-      if ((!Array.isArray(recovered.recipeRows) || !recovered.recipeRows.length) && Array.isArray(saved.rows) && saved.rows.length) {
-        recovered.recipeRows = saved.rows;
+      let restored = window.MeatHistoryRecovery.restoreSaved(record, saved ? [saved] : []);
+      const option = saved ? recordOptionForSavedRecipe(saved) : null;
+      const spec = option ? packagingSpecForRecordOption(option) : null;
+      if (option) {
+        restored = { ...restored, recipeId: restored.recipeId || option.id, productId: restored.productId || packagingProductIdForOption(option),
+          recipeCode: restored.recipeCode || saved.recipeCode || recipeCodeForRecipe(option.recipe),
+          recipeKind: restored.recipeKind || (option.recipe && option.recipe.kind), packagingKey: restored.packagingKey || saved.packagingKey || option.packagingKey };
       }
-      fillValue("savedRecipeId", savedRecipeRecordId(saved));
-      fillValue("savedCalculationId", savedRecipeRecordId(saved));
-      fillValue("savedRecipeName", saved.savedRecipeName || saved.recipeName);
-      fillValue("recipeName", saved.recipeName);
-      fillValue("recipeId", option && option.id);
-      fillValue("productId", option && packagingProductIdForOption(option));
-      fillValue("packagingKey", saved.packagingKey || (option && option.packagingKey));
-      fillValue("recipeCode", saved.recipeCode || (option && recipeCodeForRecipe(option.recipe)));
-      fillValue("recipeKind", saved.recipeKind || (option && option.recipe && option.recipe.kind));
-      if ((!recovered.packagingUnit || recovered.packagingUnit === "袋") && packagingSpec && packagingSpec.unit) {
-        recovered.packagingUnit = packagingSpec.unit;
+      if (spec && !(Number(restored.savedUnitWeightG) > 0)) {
+        restored.savedUnitWeightG = spec.unitWeight;
+        restored.packagingUnit = restored.packagingUnit || spec.unit;
       }
-      if (!(Number(recovered.savedUnitWeightG || 0) > 0) && packagingSpec && Number(packagingSpec.unitWeight || 0) > 0) {
-        recovered.savedUnitWeightG = Number(packagingSpec.unitWeight);
-        recovered.unitWeight = Number(packagingSpec.unitWeight);
-        recovered.packWeight = Number(packagingSpec.unitWeight);
-      }
-
-      const theoretical = Number(recovered.theoreticalFinishedWeight || recovered.totalWeight || 0);
-      let completedWeight = Number(recovered.actualFinishedWeightG || recovered.finishedWeight || 0);
-      const yieldRate = Number(recovered.actualYieldPercent != null ? recovered.actualYieldPercent : recovered.yieldRate);
-      if (!(completedWeight > 0) && theoretical > 0 && yieldRate > 0) {
-        completedWeight = theoretical * yieldRate / 100;
-        recovered.actualFinishedWeightG = completedWeight;
-        recovered.finishedWeight = completedWeight;
-      }
-
-      const isHerb = isCombinedHerbManufacturingRecord(recovered);
-      const isGibier = isGibierManufacturingRecord(recovered);
-      const currentCount = Number(recovered.packagingUnit === "本" ? recovered.completedCount : recovered.packageCount);
-      if (!isHerb && !isGibier && !(currentCount > 0) && completedWeight > 0 && packagingSpec && Number(packagingSpec.unitWeight || 0) > 0) {
-        const inferred = completedWeight / Number(packagingSpec.unitWeight);
-        const rounded = Math.round(inferred);
-        if (Math.abs(inferred - rounded) <= 0.08) {
-          if (packagingSpec.unit === "本") recovered.completedCount = String(rounded);
-          else recovered.packageCount = String(rounded);
-        }
-      }
-      recovered.recoverySource = "saved-recipe";
-      return recovered;
+      return window.MeatHistoryRecovery.inferCount(restored);
     }
 
     function generateManufacturingLot(dateString, category, recipe, packagingKey = "") {

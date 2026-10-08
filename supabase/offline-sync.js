@@ -374,6 +374,14 @@
     await setBundleSyncState(bundle.record.id, "syncing");
     try {
       const fresh = await bundleForRecord({ ...bundle.record, sync_status: "syncing" });
+      const missing = ["business_id", "product_id", "recipe_id", "recipe_version_id"].filter((key) => !fresh.record[key]);
+      for (const allocation of fresh.allocations) {
+        if (Number(allocation.quantity) > 0 && allocation.allocation_type !== "LEGACY_META") {
+          if (!allocation.packaging_master_id) missing.push(`${allocation.allocation_type}.packaging_master_id`);
+          if (!allocation.packaging_version_id) missing.push(`${allocation.allocation_type}.packaging_version_id`);
+        }
+      }
+      if (missing.length) throw new Error(`Supabase同期に必要なマスタIDが不足しています（${missing.join(", ")}）`);
       await sendBundle(fresh);
       await setBundleSyncState(bundle.record.id, "synced");
       return { synced: true, recordId: bundle.record.id };
@@ -402,7 +410,26 @@
     syncPromise = (async () => {
       const records = await pendingRecords();
       const results = [];
-      for (const record of records) results.push(await syncBundle(await bundleForRecord(record)));
+      let bundles = [];
+      for (const record of records) bundles.push(await bundleForRecord(record));
+      const prepare = currentConfig.preparePending || (global.MeatHistoryRecovery && global.MeatProductionSyncAdapter ? async (pending) => {
+        if (global.MeatProductionMasterData) await global.MeatProductionMasterData.refresh();
+        return pending.map((bundle) => global.MeatProductionSyncAdapter.fromLegacy(
+          global.MeatHistoryRecovery.fromBundle(bundle), currentConfig, { uuid }
+        ));
+      } : null);
+      if (prepare && bundles.length) bundles = await prepare(bundles);
+      for (const bundle of bundles) {
+        if (bundle.recoveryError) {
+          await setBundleSyncState(bundle.record.id, "error", bundle.recoveryError);
+          results.push({ synced: false, recordId: bundle.record.id, error: new Error(bundle.recoveryError) });
+          continue;
+        }
+        // Replace stale record and allocations atomically before attempting the send.
+        const fresh = prepare
+          ? await putBundle(bundle.record, bundle.allocations, "pending") : bundle;
+        results.push(await syncBundle(fresh));
+      }
       return results;
     })();
     try {
@@ -464,6 +491,7 @@
     getLocalRecords,
     getLocalHistory,
     pullHistoryFromCloud,
+    fetchCloudHistory,
     refreshHistoryCache,
     getMeta,
     pendingCount,

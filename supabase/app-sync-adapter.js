@@ -89,7 +89,7 @@
     if (code && !/^[0-9A-F]{8}-[0-9A-F-]{27}$/i.test(code) && !code.startsWith("RECIPE_") && !code.startsWith("PROD_")) return code;
 
     const rawName = String(record.savedRecipeName || record.recipeName || record.product || "").replace(/（.*$/, "").trim();
-    const nameHit = Object.keys(NAME_CODE_ALIASES).find((name) => rawName.includes(name));
+    const nameHit = Object.keys(NAME_CODE_ALIASES).sort((a, b) => b.length - a.length).find((name) => rawName.includes(name));
     if (nameHit) return NAME_CODE_ALIASES[nameHit];
 
     return codeFromLot(record.lot) || "UNKNOWN";
@@ -149,6 +149,8 @@
       togeAllocatedWeight: record.togeAllocatedWeight, togeComponentType: record.togeComponentType,
       finishedWeight: record.finishedWeight, yieldRate: record.yieldRate,
       savedUnitWeightG: record.savedUnitWeightG,
+      herbStandardUnitWeightG: record.herbStandardUnitWeightG,
+      herbEventUnitWeightG: record.herbEventUnitWeightG,
       actualFinishedWeightG: record.actualFinishedWeightG,
       actualYieldPercent: record.actualYieldPercent,
       createdAt: record.createdAt, updatedAt: record.updatedAt, savedAt: record.savedAt
@@ -160,6 +162,14 @@
     const result = [];
     const add = (type, quantity, quantityUnit, unitWeight, completed = true, loss = false, packagingCode = type) => {
       const safeQuantity = number(quantity);
+      // Keep historical unit weight when present; recover a missing snapshot from
+      // the same current packaging version whose UUID is used in this bundle.
+      if (!(number(unitWeight) > 0) && type !== "LOSS" && global.MeatProductionMasterData) {
+        const masters = global.MeatProductionMasterData.getCurrent();
+        const versionId = idFor("packagingVersions", packagingCode, config);
+        const version = masters && masters.packagingVersions.find((item) => item.id === versionId);
+        if (version) unitWeight = version.unit_weight_g;
+      }
       if (safeQuantity <= 0 && type !== "LOSS") return;
       result.push(allocation(recordId, businessId, {
         allocation_type: type,

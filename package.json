@@ -1,0 +1,9 @@
+{
+  "name": "meat-recipe-app",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/*.test.cjs && node tests/sync-integration.cjs",
+    "test:unit": "node --test tests/*.test.cjs"
+  },
+  "devDependencies": { "playwright-core": "1.58.2" }
+}
