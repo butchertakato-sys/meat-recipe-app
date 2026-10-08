@@ -216,6 +216,47 @@
       margin-bottom: 12px;
     }
 
+    .record-save {
+      min-height: 64px;
+      margin-top: 4px;
+    }
+
+    .record-other > summary {
+      display: flex;
+      align-items: center;
+      min-height: 60px;
+      padding: 14px 16px;
+      border: 2px solid var(--line);
+      border-radius: 12px;
+      color: var(--ink);
+      font-weight: 700;
+      cursor: pointer;
+      list-style: none;
+      touch-action: manipulation;
+    }
+
+    .record-other > summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .record-other > summary:focus-visible {
+      outline: 3px solid var(--brand);
+      outline-offset: 3px;
+    }
+
+    .record-other .record-other-close,
+    .record-other[open] .record-other-open {
+      display: none;
+    }
+
+    .record-other[open] .record-other-close {
+      display: inline;
+    }
+
+    .record-other[open] > summary {
+      margin-bottom: 14px;
+    }
+
     .record-primary-row {
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -1420,7 +1461,7 @@
       saveScreenState("recordTop", ["home", "records"]);
       setHeader("製造記録", "記録・履歴・CSV出力", true, showHome);
       const items = [
-        { label: "新規製造記録", description: "製造内容を入力して保存", type: "record-new", id: "new" },
+        { label: "製造数入力", description: "製造内容を入力して保存", type: "record-new", id: "new" },
         { label: "保存済みレシピ確認", description: "保存した計算結果を確認・編集", type: "saved-recipe-list", id: "saved-recipes" },
         { label: "製造記録履歴", description: "保存した記録を確認", type: "record-history", id: "history" },
         { label: "CSV出力", description: "保存済み記録を書き出し", type: "record-csv", id: "csv" },
@@ -1820,7 +1861,7 @@
 
     function showManufacturingRecordForm(draft = {}, backHandler = showManufacturingRecordTop) {
       saveScreenState("recordForm", ["home", "records", "new"], draft);
-      setHeader("新規製造記録", "既存レシピから記録", true, backHandler);
+      setHeader("製造数入力", "既存レシピから記録", true, backHandler);
       app.innerHTML = `
         <input id="recordSavedRecipeId" type="hidden" value="${escapeHtml(draft.recordSavedRecipeId || "")}">
         <select id="recordCategory" hidden><option value="自社レシピ">自社レシピ</option><option value="委託製造">委託製造</option></select>
@@ -1889,10 +1930,14 @@
             <div class="product-name" id="recordCompletedCountDisplay" style="display:none">完成本数: 0本</div>
           </div>
         </section>
-        <section class="section">
-          <h2>その他の製造記録入力</h2>
+        <div class="record-actions">
+          <button id="recordSave" class="primary record-save" type="button">保存</button>
+        </div>
+        <div id="recordStatus" class="status" role="status"></div>
+        <details class="section record-other">
+          <summary><span class="record-other-open">＋ その他を入力</span><span class="record-other-close">－ その他を閉じる</span></summary>
           <div class="field-row">
-            <label>余り重量(g)
+            <label>余り生地重量（g）
               <input id="recordLeftoverWeight" type="number" inputmode="decimal" min="0" step="0.1" value="0">
             </label>
             <label>メモ
@@ -1901,13 +1946,11 @@
             <div class="product-name" id="recordFinishedWeightDisplay">完成重量: 計算不可</div>
             <div class="product-name" id="recordYieldDisplay">実績歩留まり: 0.0%</div>
             <button id="recordGoodNotes" class="secondary" type="button">GoodNotes転記</button>
-            <button id="recordSave" class="primary" type="button">保存</button>
           </div>
           <div class="copy-area">
             <textarea id="recordGoodNotesText" readonly></textarea>
-            <div id="recordStatus" class="status"></div>
           </div>
-        </section>
+        </details>
         <section class="section">
           <h2>レシピ由来の情報</h2>
           <div id="recordSavedCalcStatus" class="empty"></div>
@@ -2905,10 +2948,7 @@
           <div class="copy-area">
             <textarea id="recordDetailText" readonly></textarea>
             <div class="record-actions">
-              ${editMode ? `
-                <button id="recordEditSave" class="primary" type="button">保存</button>
-                <button id="recordEditCancel" class="secondary" type="button">キャンセル</button>
-              ` : `
+              ${editMode ? "" : `
                 <button id="recordDetailCopy" class="primary" type="button">GoodNotes用にコピー</button>
                 <button id="recordDetailEdit" class="secondary" type="button">編集</button>
                 <button id="recordDetailDelete" class="secondary" type="button">削除</button>
@@ -3040,15 +3080,21 @@
           </div>
           ` : ""}
         </div>
-        <h2>その他の製造記録入力</h2>
+        <div class="record-actions">
+          <button id="recordEditSave" class="primary record-save" type="button">保存</button>
+          <button id="recordEditCancel" class="secondary" type="button">キャンセル</button>
+        </div>
+        <details class="record-other">
+          <summary><span class="record-other-open">＋ その他を入力</span><span class="record-other-close">－ その他を閉じる</span></summary>
         <div class="field-row">
-          <label>余り重量(g)
+          <label>余り生地重量（g）
             <input id="editRecordLeftoverWeight" type="number" inputmode="decimal" min="0" step="0.1" value="${escapeHtml(record.leftoverWeight || "0")}">
           </label>
           <label>メモ
             <textarea id="editRecordMemo">${escapeHtml(record.memo || "")}</textarea>
           </label>
         </div>
+        </details>
         <div id="recordEditPreview"></div>
       `;
     }
