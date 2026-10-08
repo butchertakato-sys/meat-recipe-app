@@ -168,6 +168,79 @@
     return payload;
   }
 
+  async function directRestRequest(path, options = {}) {
+    const token = await accessToken();
+    if (!token) throw new Error("Supabase authentication session is not available");
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    try {
+      const response = await fetch(`${currentConfig.url.replace(/\/$/, "")}/rest/v1/${path}`, {
+        ...options,
+        headers: {
+          apikey: currentConfig.publishableKey,
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          ...(options.headers || {})
+        },
+        signal: controller.signal
+      });
+      const text = await response.text();
+      if (!response.ok) throw new Error(`Supabase ${response.status}: ${text.slice(0, 500)}`);
+      return text ? JSON.parse(text) : null;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  async function directUpsertBundle(bundle) {
+    const recordPayload = cloudRecord(bundle.record);
+    delete recordPayload.legacy_payload;
+
+    await directRestRequest("manufacturing_records?on_conflict=id", {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify(recordPayload)
+    });
+
+    const existing = await directRestRequest(
+      `manufacturing_allocations?select=id,allocation_type&manufacturing_record_id=eq.${encodeURIComponent(recordPayload.id)}`,
+      { method: "GET" }
+    ) || [];
+    const existingByType = new Map(existing.map((row) => [row.allocation_type, row]));
+
+    const incoming = bundle.allocations.map((allocation) => {
+      const payload = cloudAllocation(allocation);
+      const sameType = existingByType.get(payload.allocation_type);
+      if (sameType) payload.id = sameType.id;
+      return payload;
+    });
+
+    if (incoming.length) {
+      await directRestRequest("manufacturing_allocations?on_conflict=id", {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify(incoming)
+      });
+    }
+
+    const incomingTypes = new Set(incoming.map((row) => row.allocation_type));
+    for (const stale of existing) {
+      if (incomingTypes.has(stale.allocation_type)) continue;
+      await directRestRequest(`manufacturing_allocations?id=eq.${encodeURIComponent(stale.id)}`, {
+        method: "PATCH",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({
+          quantity: 0,
+          calculated_weight_g: 0,
+          count_as_completed_weight: false,
+          count_as_loss: false
+        })
+      });
+    }
+
+    return { fallback: "direct-rest" };
+  }
+
   async function sendBundle(bundle) {
     if (!cloudConfigured()) throw new Error("Supabase connection is not configured");
     const token = await accessToken();
@@ -194,6 +267,11 @@
     }
     if (!response.ok) {
       const detail = await response.text();
+      const rpcMissing = response.status === 404 && (detail.includes("PGRST202") || detail.includes("save_manufacturing_record"));
+      if (rpcMissing) {
+        console.warn("[Supabase同期] RPCが見つからないため直接REST同期へ切り替えます。");
+        return await directUpsertBundle(bundle);
+      }
       throw new Error(`Supabase ${response.status}: ${detail.slice(0, 500)}`);
     }
     return response;
