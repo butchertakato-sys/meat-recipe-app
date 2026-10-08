@@ -49,10 +49,50 @@
     ZANZATEI: ["ZANZATEI_DEER"]
   });
 
+  const NAME_CODE_ALIASES = Object.freeze({
+    "あらびき": "ARABIKI",
+    "無添加あらびき": "ADDITIVE_FREE_ARABIKI",
+    "ハーブ": "HERB",
+    "チーズ": "CHEESE",
+    "チョリソー": "CHORIZO",
+    "山小屋": "YAMAGOYA",
+    "ジビエセンター": "GIBIER_CENTER",
+    "ざんざ亭": "ZANZATEI"
+  });
+
+  function codeFromLot(lot) {
+    const raw = String(lot || "").toUpperCase();
+    const aliases = [
+      ["CHORIZO", "CHORIZO"],
+      ["ARABIKI", "ARABIKI"],
+      ["HERB", "HERB"],
+      ["CHEESE", "CHEESE"],
+      ["GIBIER", "GIBIER_CENTER"],
+      ["YAMAGOYA", "YAMAGOYA"],
+      ["ZANZATEI", "ZANZATEI"]
+    ];
+    const hit = aliases.find(([needle]) => raw.includes(`-${needle}-`) || raw.includes(`-${needle}_`));
+    return hit ? hit[1] : "";
+  }
+
   function internalCode(record) {
-    const legacyCode = record.recipeCode || record.productCode || record.recipeId || record.productId || "";
+    const legacyCode =
+      record.recipeInternalCode ||
+      record.productInternalCode ||
+      record.recipeCode ||
+      record.productCode ||
+      record.recipeId ||
+      record.productId ||
+      "";
     const code = String(legacyCode).toUpperCase();
-    return CODE_ALIASES[code] || code || "UNKNOWN";
+    if (CODE_ALIASES[code]) return CODE_ALIASES[code];
+    if (code && !/^[0-9A-F]{8}-[0-9A-F-]{27}$/i.test(code) && !code.startsWith("RECIPE_") && !code.startsWith("PROD_")) return code;
+
+    const rawName = String(record.savedRecipeName || record.recipeName || record.product || "").replace(/（.*$/, "").trim();
+    const nameHit = Object.keys(NAME_CODE_ALIASES).find((name) => rawName.includes(name));
+    if (nameHit) return NAME_CODE_ALIASES[nameHit];
+
+    return codeFromLot(record.lot) || "UNKNOWN";
   }
 
   function idFor(group, code, config) {
@@ -176,9 +216,9 @@
     const cloudRecord = {
       id: recordId,
       business_id: config.businessId || null,
-      product_id: idFor("products", code, config),
-      recipe_id: idFor("recipes", code, config),
-      recipe_version_id: idFor("recipeVersions", code, config),
+      product_id: record.cloudProductId || idFor("products", code, config),
+      recipe_id: record.cloudRecipeId || idFor("recipes", code, config),
+      recipe_version_id: record.cloudRecipeVersionId || idFor("recipeVersions", code, config),
       prep_date: record.prepDate || null,
       manufacturing_date: record.date || null,
       lot_number: record.lot || "",
