@@ -323,29 +323,34 @@
     return checks.every(Boolean);
   }
 
-  function cloudHasLegacyMeta(row) {
-    return Boolean(
-      row &&
-      Array.isArray(row.manufacturing_allocations) &&
-      row.manufacturing_allocations.some((item) => item.allocation_type === "LEGACY_META" && item.notes)
-    );
+  function cloudLegacyMetaPayload(row) {
+    if (!row || !Array.isArray(row.manufacturing_allocations)) return {};
+    const meta = row.manufacturing_allocations.find((item) => item.allocation_type === "LEGACY_META" && item.notes);
+    if (!meta) return {};
+    try {
+      const parsed = JSON.parse(meta.notes);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch (_) {
+      return {};
+    }
   }
 
-  function hasRecoverableLegacyData(record) {
-    if (!record) return false;
+  function recoveryDataScore(record) {
+    if (!record) return 0;
     const positive = (value) => Number(value || 0) > 0;
-    return Boolean(
-      positive(record.meatTotal) ||
-      positive(record.meat6mm) ||
-      positive(record.meat3mm) ||
-      positive(record.packageCount) ||
-      positive(record.completedCount) ||
-      positive(record.herbStandardPackageCount) ||
-      positive(record.herbEventPieceCount) ||
-      positive(record.smokedCount) ||
-      positive(record.unsmokedCount) ||
-      (Array.isArray(record.recipeRows) && record.recipeRows.length)
-    );
+    let score = 0;
+    if (positive(record.meatTotal)) score += 5;
+    if (positive(record.meat6mm) || positive(record.meat3mm)) score += 2;
+    if (positive(record.packageCount) || positive(record.completedCount)) score += 5;
+    if (positive(record.herbStandardPackageCount) || positive(record.herbEventPieceCount)) score += 4;
+    if (positive(record.smokedCount) || positive(record.unsmokedCount)) score += 4;
+    if (Array.isArray(record.recipeRows) && record.recipeRows.length) score += 5;
+    if (positive(record.totalWeight) || positive(record.recipeTotal)) score += 2;
+    return score;
+  }
+
+  function shouldRepublishRecovery(record, cloudRow) {
+    return recoveryDataScore(record) > recoveryDataScore(cloudLegacyMetaPayload(cloudRow));
   }
 
   function cloudLotMap(rows) {
@@ -386,7 +391,7 @@
       if (record.cloudRecordId) {
         const linkedCloud = cloud.find((row) => row.id === record.cloudRecordId);
         if (linkedCloud) {
-          if (hasRecoverableLegacyData(record) && !cloudHasLegacyMeta(linkedCloud)) {
+          if (shouldRepublishRecovery(record, linkedCloud)) {
             const recoveryResult = await uploadLocal(record, { migration: true, preserveLot: true, recovery: true });
             if (recoveryResult && recoveryResult.synced) uploaded += 1;
             else {
@@ -413,7 +418,7 @@
             syncStatus: "synced",
             syncError: ""
           };
-          if (hasRecoverableLegacyData(linkedRecord) && !cloudHasLegacyMeta(equivalent)) {
+          if (shouldRepublishRecovery(linkedRecord, equivalent)) {
             const recoveryResult = await uploadLocal(linkedRecord, { migration: true, preserveLot: true, recovery: true });
             if (recoveryResult && recoveryResult.synced) uploaded += 1;
             else {
