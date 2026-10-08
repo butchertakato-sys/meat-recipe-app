@@ -405,7 +405,7 @@
       if (matches.length) {
         const equivalent = matches.find((row) => manufacturingEquivalent(record, row));
         if (equivalent) {
-          local[index] = {
+          const linkedRecord = {
             ...record,
             id: equivalent.id,
             manufacturingRecordId: equivalent.id,
@@ -413,6 +413,17 @@
             syncStatus: "synced",
             syncError: ""
           };
+          if (hasRecoverableLegacyData(linkedRecord) && !cloudHasLegacyMeta(equivalent)) {
+            const recoveryResult = await uploadLocal(linkedRecord, { migration: true, preserveLot: true, recovery: true });
+            if (recoveryResult && recoveryResult.synced) uploaded += 1;
+            else {
+              linkedRecord.syncStatus = "error";
+              linkedRecord.syncError = recoveryResult && recoveryResult.error
+                ? String(recoveryResult.error.message || recoveryResult.error)
+                : "過去履歴の復旧同期に失敗しました";
+            }
+          }
+          local[index] = linkedRecord;
           merged += 1;
           continue;
         }
