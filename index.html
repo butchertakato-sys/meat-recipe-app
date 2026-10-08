@@ -2046,7 +2046,7 @@
     }
 
     function isCombinedHerbManufacturingRecord(record) {
-      return Boolean(record) && (record.recipeId === "own:herb" || record.herbStandardPackageCount != null || record.herbEventPieceCount != null);
+      return Boolean(record) && MeatProductionSyncAdapter.internalCode(record) === "HERB";
     }
 
     function herbRecordOptionId(record) {

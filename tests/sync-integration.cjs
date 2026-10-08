@@ -55,6 +55,32 @@ const base={id:'old-record',lot:'20261008-JI-ARABIKI-01',recipeName:'あらび�
  async function device(){const context=await browser.newContext({viewport:{width:820,height:1180}});await context.route('**/*',mock);await context.addInitScript(()=>{window.MEAT_SUPABASE_CONFIG={enabled:true,url:'https://supabase.test',publishableKey:'test-key',businessId:'business',accessToken:'test-token'};Object.defineProperty(navigator,'onLine',{get:()=>false});});const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));await page.goto('http://app.test/');await page.evaluate(async()=>{await initializeManufacturingSync();await initializeSupabaseMasterData();MeatCrossDeviceSync.initialize(MEAT_SUPABASE_CONFIG);});return {context,page};}
  try {
  const a=await device(),page=a.page;
+ // Real observed quantities with contaminating herb zero fields: exercise rendered list,
+ // detail, edit and GoodNotes without changing or normalizing the records first.
+ await page.evaluate(async()=>{
+   const fixtures=[
+     {recipeName:'チョリソー',recipeCode:'CHORIZO',packageCount:37},
+     {recipeName:'あらびき',recipeCode:'ARABIKI',packageCount:11},
+     {recipeName:'ハーブ',recipeCode:'HERB',herbEventPieceCount:161},
+     {recipeName:'ハーブ',recipeCode:'HERB',herbEventPieceCount:0}
+   ].map((r,i)=>({id:'classification-'+i,category:'自社レシピ',packagingUnit:'パック',herbStandardPackageCount:0,herbEventPieceCount:0,...r}));
+   localStorage.setItem('manufacturingRecords',JSON.stringify(fixtures));
+   showManufacturingRecordHistory();
+   for(const [i,r] of fixtures.entries()){
+     const herb=i>=2;
+     if(isCombinedHerbManufacturingRecord(r)!==herb)throw Error('incorrect type '+r.recipeCode);
+     const detail=manufacturingRecordReadHtml(r), text=buildManufacturingRecordText(r), edit=manufacturingRecordEditHtml(r);
+     for(const output of [detail,text]){
+       if(herb){if(!output.includes('製品用：0パック')||!output.includes('イベント用：'+r.herbEventPieceCount+'本'))throw Error('herb display lost');}
+       else {if(!output.includes('包装数：'+r.packageCount)||output.includes('イベント用'))throw Error('standard display lost '+r.recipeCode);}
+     }
+     if(!herb&&edit.includes('イベント用'))throw Error('standard edit misclassified');
+   }
+   const list=document.body.innerText;
+   if(!list.includes('包装数: 37')||!list.includes('包装数: 11')||!list.includes('イベント用: 161本'))throw Error('history list incorrect');
+   localStorage.removeItem('manufacturingRecords');
+ });
+ console.log('PASS product classification: history/detail/edit/GoodNotes CHORIZO 37, ARABIKI 11, HERB 0/161 and 0/0');
  const oldId=id();const herbId=id();
  await page.evaluate(async({base,oldId,herbId})=>{
   localStorage.setItem('meatRecipeApp.manufacturingRecords.v1',JSON.stringify([{...base},{...base,id:'old-herb',lot:'20261008-JI-HERB-01',recipeName:'ハーブ',packageCount:'',herbStandardPackageCount:0,herbEventPieceCount:161,herbStandardUnitWeightG:180,herbEventUnitWeightG:35}]));
