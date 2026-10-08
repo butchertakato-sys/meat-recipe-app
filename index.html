@@ -1165,8 +1165,17 @@
     function cachedBundleToManufacturingRecord(bundle) {
       const cloud = bundle.record || {};
       const allocations = bundle.allocations || [];
-      const legacy = cloud.legacy_payload && typeof cloud.legacy_payload === "object" ? cloud.legacy_payload : {};
       const allocation = (type) => allocations.find((item) => item.allocation_type === type);
+      const recoveryMeta = allocation("LEGACY_META");
+      let recoveryPayload = {};
+      if (recoveryMeta && recoveryMeta.notes) {
+        try {
+          const parsed = JSON.parse(recoveryMeta.notes);
+          if (parsed && typeof parsed === "object") recoveryPayload = parsed;
+        } catch (_) {}
+      }
+      const cloudLegacy = cloud.legacy_payload && typeof cloud.legacy_payload === "object" ? cloud.legacy_payload : {};
+      const legacy = { ...recoveryPayload, ...cloudLegacy };
       const standard = allocation("STANDARD");
       const herbStandard = allocation("HERB_STANDARD");
       const herbEvent = allocation("HERB_EVENT");
