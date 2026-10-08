@@ -323,6 +323,31 @@
     return checks.every(Boolean);
   }
 
+  function cloudHasLegacyMeta(row) {
+    return Boolean(
+      row &&
+      Array.isArray(row.manufacturing_allocations) &&
+      row.manufacturing_allocations.some((item) => item.allocation_type === "LEGACY_META" && item.notes)
+    );
+  }
+
+  function hasRecoverableLegacyData(record) {
+    if (!record) return false;
+    const positive = (value) => Number(value || 0) > 0;
+    return Boolean(
+      positive(record.meatTotal) ||
+      positive(record.meat6mm) ||
+      positive(record.meat3mm) ||
+      positive(record.packageCount) ||
+      positive(record.completedCount) ||
+      positive(record.herbStandardPackageCount) ||
+      positive(record.herbEventPieceCount) ||
+      positive(record.smokedCount) ||
+      positive(record.unsmokedCount) ||
+      (Array.isArray(record.recipeRows) && record.recipeRows.length)
+    );
+  }
+
   function cloudLotMap(rows) {
     const map = new Map();
     for (const row of rows || []) {
@@ -358,13 +383,29 @@
         continue;
       }
 
-      if (record.cloudRecordId && cloud.some((row) => row.id === record.cloudRecordId)) continue;
+      if (record.cloudRecordId) {
+        const linkedCloud = cloud.find((row) => row.id === record.cloudRecordId);
+        if (linkedCloud) {
+          if (hasRecoverableLegacyData(record) && !cloudHasLegacyMeta(linkedCloud)) {
+            const recoveryResult = await uploadLocal(record, { migration: true, preserveLot: true, recovery: true });
+            if (recoveryResult && recoveryResult.synced) uploaded += 1;
+            else {
+              local[index] = {
+                ...record,
+                syncStatus: "error",
+                syncError: recoveryResult && recoveryResult.error ? String(recoveryResult.error.message || recoveryResult.error) : "過去履歴の復旧同期に失敗しました"
+              };
+            }
+          }
+          continue;
+        }
+      }
 
       const matches = byLot.get(lot) || [];
       if (matches.length) {
         const equivalent = matches.find((row) => manufacturingEquivalent(record, row));
         if (equivalent) {
-          local[index] = {
+          const linkedRecord = {
             ...record,
             id: equivalent.id,
             manufacturingRecordId: equivalent.id,
@@ -372,6 +413,17 @@
             syncStatus: "synced",
             syncError: ""
           };
+          if (hasRecoverableLegacyData(linkedRecord) && !cloudHasLegacyMeta(equivalent)) {
+            const recoveryResult = await uploadLocal(linkedRecord, { migration: true, preserveLot: true, recovery: true });
+            if (recoveryResult && recoveryResult.synced) uploaded += 1;
+            else {
+              linkedRecord.syncStatus = "error";
+              linkedRecord.syncError = recoveryResult && recoveryResult.error
+                ? String(recoveryResult.error.message || recoveryResult.error)
+                : "過去履歴の復旧同期に失敗しました";
+            }
+          }
+          local[index] = linkedRecord;
           merged += 1;
           continue;
         }

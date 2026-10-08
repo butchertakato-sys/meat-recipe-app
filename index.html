@@ -1165,8 +1165,17 @@
     function cachedBundleToManufacturingRecord(bundle) {
       const cloud = bundle.record || {};
       const allocations = bundle.allocations || [];
-      const legacy = cloud.legacy_payload && typeof cloud.legacy_payload === "object" ? cloud.legacy_payload : {};
       const allocation = (type) => allocations.find((item) => item.allocation_type === type);
+      const recoveryMeta = allocation("LEGACY_META");
+      let recoveryPayload = {};
+      if (recoveryMeta && recoveryMeta.notes) {
+        try {
+          const parsed = JSON.parse(recoveryMeta.notes);
+          if (parsed && typeof parsed === "object") recoveryPayload = parsed;
+        } catch (_) {}
+      }
+      const cloudLegacy = cloud.legacy_payload && typeof cloud.legacy_payload === "object" ? cloud.legacy_payload : {};
+      const legacy = { ...recoveryPayload, ...cloudLegacy };
       const standard = allocation("STANDARD");
       const herbStandard = allocation("HERB_STANDARD");
       const herbEvent = allocation("HERB_EVENT");
@@ -1259,6 +1268,44 @@
       return "端末統合：確認中";
     }
 
+    function manufacturingRecoveryScore(record) {
+      if (!record) return 0;
+      let score = 0;
+      const positive = (value) => Number(value || 0) > 0;
+      if (positive(record.meatTotal)) score += 5;
+      if (positive(record.meat6mm) || positive(record.meat3mm)) score += 2;
+      if (positive(record.packageCount) || positive(record.completedCount)) score += 5;
+      if (positive(record.herbStandardPackageCount) || positive(record.herbEventPieceCount)) score += 4;
+      if (positive(record.smokedCount) || positive(record.unsmokedCount)) score += 4;
+      if (Array.isArray(record.recipeRows) && record.recipeRows.length) score += 5;
+      if (positive(record.totalWeight) || positive(record.recipeTotal)) score += 2;
+      if (positive(record.savedUnitWeightG) || positive(record.unitWeight) || positive(record.packWeight)) score += 1;
+      if (record.memo) score += 1;
+      return score;
+    }
+
+    function mergeManufacturingRecoveryRecords(first, second) {
+      if (!first) return { ...second };
+      if (!second) return { ...first };
+      const firstScore = manufacturingRecoveryScore(first);
+      const secondScore = manufacturingRecoveryScore(second);
+      const rich = secondScore > firstScore ? second : first;
+      const other = rich === first ? second : first;
+      const cloudId = first.cloudRecordId || second.cloudRecordId || "";
+      return {
+        ...other,
+        ...rich,
+        id: cloudId || rich.id || other.id,
+        manufacturingRecordId: cloudId || rich.manufacturingRecordId || other.manufacturingRecordId || rich.id || other.id,
+        cloudRecordId: cloudId,
+        lot: rich.lot || other.lot || "",
+        prepDate: rich.prepDate || other.prepDate || "",
+        date: rich.date || other.date || "",
+        recipeName: rich.recipeName || other.recipeName || "",
+        product: rich.product || other.product || ""
+      };
+    }
+
     async function runCrossDeviceIntegration() {
       if (!window.MeatCrossDeviceSync) return null;
       if (crossDeviceIntegrationPromise) return crossDeviceIntegrationPromise;
@@ -1274,16 +1321,15 @@
               const indexed = await loadIndexedManufacturingHistory().catch(() => []);
               const merged = new Map();
               [...legacy, ...indexed].forEach((record) => {
-                const key = record.cloudRecordId || record.manufacturingRecordId || record.id || [
-                  record.lot || "",
-                  record.prepDate || "",
-                  record.date || "",
-                  record.recipeName || record.product || ""
-                ].join("|");
-                const existing = merged.get(key);
-                if (!existing || String(record.updatedAt || record.savedAt || "").localeCompare(String(existing.updatedAt || existing.savedAt || "")) > 0) {
-                  merged.set(key, record);
-                }
+                const lot = String(record.lot || "").trim();
+                const key = lot
+                  ? `lot:${lot}`
+                  : `id:${record.cloudRecordId || record.manufacturingRecordId || record.id || [
+                      record.prepDate || "",
+                      record.date || "",
+                      record.recipeName || record.product || ""
+                    ].join("|")}`;
+                merged.set(key, mergeManufacturingRecoveryRecords(merged.get(key), record));
               });
               return Array.from(merged.values());
             },
