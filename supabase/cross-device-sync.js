@@ -323,6 +323,31 @@
     return checks.every(Boolean);
   }
 
+  function cloudHasLegacyMeta(row) {
+    return Boolean(
+      row &&
+      Array.isArray(row.manufacturing_allocations) &&
+      row.manufacturing_allocations.some((item) => item.allocation_type === "LEGACY_META" && item.notes)
+    );
+  }
+
+  function hasRecoverableLegacyData(record) {
+    if (!record) return false;
+    const positive = (value) => Number(value || 0) > 0;
+    return Boolean(
+      positive(record.meatTotal) ||
+      positive(record.meat6mm) ||
+      positive(record.meat3mm) ||
+      positive(record.packageCount) ||
+      positive(record.completedCount) ||
+      positive(record.herbStandardPackageCount) ||
+      positive(record.herbEventPieceCount) ||
+      positive(record.smokedCount) ||
+      positive(record.unsmokedCount) ||
+      (Array.isArray(record.recipeRows) && record.recipeRows.length)
+    );
+  }
+
   function cloudLotMap(rows) {
     const map = new Map();
     for (const row of rows || []) {
