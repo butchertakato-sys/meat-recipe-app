@@ -118,6 +118,50 @@ const base={id:'old-record',lot:'20261008-JI-ARABIKI-01',recipeName:'あらび�
  const conflictId=id();cloud.set(id(),{...cloud.get(oldId),id:id(),lot_number:'CONFLICT-LOT'});
  await page.evaluate(async({conflictId})=>{await MeatProductionSync.putBundle({id:conflictId,business_id:'business',lot_number:'CONFLICT-LOT',status:'active'},[],'error','master ID不足');},{conflictId});const conflictSends=sends;await page.evaluate(()=>MeatProductionSync.syncPending());assert.equal(sends,conflictSends);const conflict=(await page.evaluate(()=>MeatProductionSync.getLocalHistory())).find(b=>b.record.id===conflictId);assert.equal(conflict.record.lot_number,'CONFLICT-LOT');assert.match(conflict.record.sync_error,/LOT競合/);
  console.log('PASS LOT conflict is reported without renumbering, overwrite, or record deletion');
+ // Regression for quantities which were already synchronized incorrectly.
+ // Seed damaged cloud fixtures as synced, rather than starting with an error cache.
+ rpcMissing=false;
+ const c=await device();const d=await device();const zeroId=id();
+ const specs=[
+   {id:oldId,cloudRecordId:oldId,recipeName:'あらびき',lot:'20261008-JI-ARABIKI-01',packageCount:0,yieldRate:78,finishedWeight:4500},
+   {id:migrationId,cloudRecordId:migrationId,recipeName:'チョリソー',lot:'20261008-JI-CHORIZO-01',packageCount:0,yieldRate:89.3,finishedWeight:4500},
+   {id:herbId,cloudRecordId:herbId,recipeName:'ハーブ',lot:'20261008-JI-HERB-01',packageCount:'',herbStandardPackageCount:0,herbEventPieceCount:161,herbStandardUnitWeightG:180,herbEventUnitWeightG:35,yieldRate:99.4,finishedWeight:5635},
+   {id:zeroId,cloudRecordId:zeroId,recipeName:'チーズ',lot:'20261008-JI-CHEESE-ZERO',packageCount:0,yieldRate:0,actualYieldPercent:0,finishedWeight:0,actualFinishedWeightG:0}
+ ];
+ const damaged=await c.page.evaluate(({base,specs})=>specs.map(s=>MeatProductionSyncAdapter.fromLegacy({...base,...s,updatedAt:'2026-10-12T00:00:00Z'},MEAT_SUPABASE_CONFIG,MeatProductionSync)),{base,specs});
+ for(const bundle of damaged){
+   const row={...bundle.record};delete row.legacy_payload;cloud.set(row.id,row);
+   for(const [key,a]of allocations){
+     if(a.manufacturing_record_id!==row.id)continue;
+     const incoming=bundle.allocations.find(b=>b.allocation_type===a.allocation_type);
+     allocations.set(key,incoming?{...incoming,id:key}:{...a,quantity:0,calculated_weight_g:0});
+   }
+   for(const incoming of bundle.allocations){
+     if(![...allocations.values()].some(a=>a.manufacturing_record_id===row.id&&a.allocation_type===incoming.allocation_type))allocations.set(incoming.id,incoming);
+   }
+ }
+ await c.page.evaluate(({base,specs})=>{
+   localStorage.setItem('meatRecipeApp.manufacturingRecords.v1',JSON.stringify(specs.map(s=>({...base,...s,id:'archive-'+s.id,cloudRecordId:undefined,updatedAt:'2026-10-08T00:00:00Z',packageCount:s.recipeName==='ハーブ'?'':s.recipeName==='チョリソー'?31:25,herbStandardPackageCount:s.recipeName==='ハーブ'?25:undefined}))));
+ },{base,specs});
+ await c.page.evaluate(()=>MeatProductionSync.pullHistoryFromCloud());
+ const before=(await c.page.evaluate(()=>MeatProductionSync.getLocalHistory())).find(b=>b.record.id===oldId);
+ assert.equal(before.record.sync_status,'synced');assert.equal(before.record.sync_error,null);
+ // Confirm the actual cached quantities are zero before the refresh trigger.
+ assert.equal(Number((await c.page.evaluate(async id=>MeatHistoryRecovery.fromBundle((await MeatProductionSync.getLocalHistory()).find(b=>b.record.id===id)),oldId)).packageCount),0);
+ await c.page.evaluate(()=>refreshManufacturingHistory(true));
+ const localRecovered=await c.page.evaluate(async()=>combinedManufacturingHistory(await loadIndexedManufacturingHistory()));
+ for(const s of specs.slice(0,2)){
+   const local=localRecovered.find(r=>r.cloudRecordId===s.id);assert.equal(Number(local.packageCount),s.recipeName==='チョリソー'?31:25);assert.equal(local.syncStatus,'synced');assert.equal(local.syncError,'');assert.equal(local.lot,s.lot);
+   assert.equal(allocations.size>0,true);const standard=[...allocations.values()].find(a=>a.manufacturing_record_id===s.id&&a.allocation_type==='STANDARD');assert.equal(standard.quantity,s.recipeName==='チョリソー'?31:25);
+ }
+ const herbStable=localRecovered.find(r=>r.cloudRecordId===herbId);assert.equal(Number(herbStable.herbStandardPackageCount),0);assert.equal(Number(herbStable.herbEventPieceCount),161);
+ assert.equal(Number(localRecovered.find(r=>r.cloudRecordId===zeroId).packageCount),0);
+ await d.page.evaluate(()=>MeatProductionSync.pullHistoryFromCloud());const remoteRecovered=await d.page.evaluate(async()=>combinedManufacturingHistory(await loadIndexedManufacturingHistory()));
+ for(const s of specs.slice(0,2)){const r=remoteRecovered.find(r=>r.cloudRecordId===s.id);assert.equal(Number(r.packageCount),s.recipeName==='チョリソー'?31:25);assert.equal(r.syncStatus,'synced');assert.equal(r.syncError,'');assert.equal(r.lot,s.lot);}
+ const herbRemote=remoteRecovered.find(r=>r.cloudRecordId===herbId);assert.equal(Number(herbRemote.herbStandardPackageCount),0);assert.equal(Number(herbRemote.herbEventPieceCount),161);assert.equal(Number(remoteRecovered.find(r=>r.cloudRecordId===zeroId).packageCount),0);
+ assert.ok(await c.page.evaluate(()=>localStorage.getItem('meatRecipeApp.manufacturingRecords.v1')));
+ console.log('PASS synced-zero regression: ARABIKI/CHORIZO 0 → archive 25/31 on device A, mock Supabase, device B; herb 0/161 and genuine zero protected; no sync errors');
+
  assert.deepEqual(errors,[]);assert.deepEqual(unexpected,[]);console.log('PASS all integration assertions; no uncaught browser errors; no production requests');
  } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

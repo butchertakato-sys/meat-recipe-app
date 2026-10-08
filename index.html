@@ -1174,7 +1174,8 @@
     const manufacturingIndexedHistory = new Map();
 
     function cachedBundleToManufacturingRecord(bundle) {
-      return recoverManufacturingFromSavedRecipe(window.MeatHistoryRecovery.fromBundle(bundle));
+      // Merge all explicit historical quantities before attempting weight inference.
+      return window.MeatHistoryRecovery.fromBundle(bundle);
     }
 
     function manufacturingRecoverySources(indexedRecords = [], cloudRows = []) {
