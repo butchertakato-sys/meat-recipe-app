@@ -831,6 +831,16 @@
       }
     }
 
+    function readLegacyStorageArray(legacyKey) {
+      if (!legacyKey) return [];
+      try {
+        const parsed = JSON.parse(localStorage.getItem(legacyKey) || "[]");
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (error) {
+        return [];
+      }
+    }
+
     function amountFromRows(rows, name) {
       const row = Array.isArray(rows) ? rows.find((item) => item.name === name) : null;
       return row ? Number(row.calculated || 0) : 0;
@@ -1197,6 +1207,11 @@
         category: legacy.category || (cloud.manufacturing_type === "own" ? "自社レシピ" : "委託製造"),
         recipeName: legacy.recipeName || recipeName || "レシピ未設定",
         product: legacy.product || productName || recipeName,
+        cloudProductId: cloud.product_id || legacy.cloudProductId || "",
+        cloudRecipeId: cloud.recipe_id || legacy.cloudRecipeId || "",
+        cloudRecipeVersionId: cloud.recipe_version_id || legacy.cloudRecipeVersionId || "",
+        productInternalCode: (cloud.product && cloud.product.internal_code) || legacy.productInternalCode || "",
+        recipeInternalCode: (cloud.recipe && cloud.recipe.internal_code) || legacy.recipeInternalCode || "",
         theoreticalFinishedWeight: Number(cloud.theoretical_weight_g != null ? cloud.theoretical_weight_g : legacy.theoreticalFinishedWeight || 0),
         finishedWeight: Number(cloud.completed_weight_g != null ? cloud.completed_weight_g : legacy.finishedWeight || 0),
         actualFinishedWeightG: Number(cloud.completed_weight_g != null ? cloud.completed_weight_g : legacy.actualFinishedWeightG || 0),
@@ -1319,9 +1334,10 @@
           manufacturing: {
             loadLocal: async () => {
               const legacy = loadManufacturingRecords();
+              const legacyArchive = readLegacyStorageArray(OLD_MANUFACTURING_RECORDS_KEY);
               const indexed = await loadIndexedManufacturingHistory().catch(() => []);
               const merged = new Map();
-              [...legacy, ...indexed].forEach((record) => {
+              [...legacyArchive, ...legacy, ...indexed].forEach((record) => {
                 const recoveredRecord = recoverManufacturingFromSavedRecipe(record);
                 const lot = String(recoveredRecord.lot || "").trim();
                 const key = lot
@@ -2243,7 +2259,15 @@
     }
 
     function findRecoverySavedRecipe(record) {
-      const saved = loadSavedRecipeCalculations();
+      const savedPrimary = loadSavedRecipeCalculations();
+      const savedArchive = readLegacyStorageArray(OLD_SAVED_RECIPE_CALCULATIONS_KEY);
+      const savedMap = new Map();
+      [...savedArchive, ...savedPrimary].forEach((item, index) => {
+        const id = item.savedRecipeId || item.id || `legacy-saved-${item.savedAt || item.createdAt || index}`;
+        const existing = savedMap.get(id);
+        if (!existing || manufacturingRecoveryScore(item) > manufacturingRecoveryScore(existing)) savedMap.set(id, item);
+      });
+      const saved = Array.from(savedMap.values()).map(enrichSavedRecipeCalculation);
       const directId = record && (record.savedRecipeId || record.savedCalculationId);
       if (directId) {
         const byId = saved.find((item) => savedRecipeRecordId(item) === directId);
@@ -2952,12 +2976,24 @@
         const smokedCount = Number(item.smokedCount || 0);
         const unsmokedCount = Number(item.unsmokedCount || 0);
         const recipeRows = Array.isArray(item.recipeRows) ? item.recipeRows : [];
-        const recipeTotal = Number(item.recipeTotal != null ? item.recipeTotal : sumRows(recipeRows));
+        const hasRecipeRows = recipeRows.length > 0;
+        const storedRecipeTotal = Number(item.recipeTotal != null ? item.recipeTotal : item.total);
+        const recipeTotal = Number.isFinite(storedRecipeTotal) && storedRecipeTotal > 0
+          ? storedRecipeTotal
+          : sumRows(recipeRows);
         const meatTotal = Number(item.meatTotal || 0);
-        const waterAmount = Number(amountFromRows(recipeRows, "水"));
-        const ingredientTotal = sumIngredientRows(recipeRows);
-        const totalWeight = meatTotal + ingredientTotal;
-        const theoreticalFinishedWeight = Number(item.theoreticalFinishedWeight || 0) > 0 ? Number(item.theoreticalFinishedWeight) : totalWeight;
+        const rowWaterAmount = Number(amountFromRows(recipeRows, "水"));
+        const waterAmount = hasRecipeRows
+          ? rowWaterAmount
+          : Number(item.waterAmount || 0);
+        const ingredientTotal = hasRecipeRows ? sumIngredientRows(recipeRows) : 0;
+        const storedTotalWeight = Number(item.totalWeight || 0);
+        const totalWeight = hasRecipeRows
+          ? meatTotal + ingredientTotal
+          : (storedTotalWeight > 0 ? storedTotalWeight : meatTotal);
+        const theoreticalFinishedWeight = Number(item.theoreticalFinishedWeight || 0) > 0
+          ? Number(item.theoreticalFinishedWeight)
+          : totalWeight;
         const hasGibierCounts = Object.prototype.hasOwnProperty.call(item, "smokedCount") || Object.prototype.hasOwnProperty.call(item, "unsmokedCount");
         const gibierMetrics = calculateGibierProductionMetrics(smokedCount, unsmokedCount, theoreticalFinishedWeight);
         const storedFinishedWeight = item.actualFinishedWeightG != null ? item.actualFinishedWeightG : item.finishedWeight;
