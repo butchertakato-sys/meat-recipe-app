@@ -626,6 +626,7 @@
   <script src="supabase/master-data.js"></script>
   <script src="supabase/offline-sync.js"></script>
   <script src="supabase/history-recovery.js"></script>
+  <script src="supabase/history-diagnostics.js"></script>
   <script src="supabase/app-sync-adapter.js"></script>
   <script src="supabase/cross-device-sync.js"></script>
   <script>
@@ -2929,7 +2930,11 @@
       return record.manufacturingRecordId || record.id;
     }
 
+    let manufacturingDiagnosticsVisible = false;
+    let manufacturingDiagnosticRun = null;
+
     function renderManufacturingRecordHistory(records, message = "", cacheNotice = "", diagnostics = null) {
+      if (manufacturingDiagnosticsVisible) return;
       const lastSync = window.MeatProductionSync ? "" : "";
       app.innerHTML = `
         <section class="section">
@@ -2952,8 +2957,12 @@
               `).join("")}
             </div>
           `}
+          <div class="record-actions">
+            <button id="pastManufacturingDiagnostics" class="secondary" type="button">過去データ診断</button>
+          </div>
         </section>
       `;
+      document.getElementById("pastManufacturingDiagnostics").addEventListener("click", showPastManufacturingDiagnostics);
       document.getElementById("recordHistoryRefresh").addEventListener("click", () => refreshManufacturingHistory(true));
       if (window.MeatProductionSync) {
         window.MeatProductionSync.getMeta("last_history_sync_at").then((value) => {
@@ -2963,10 +2972,117 @@
       }
     }
 
+    async function collectPastManufacturingDiagnosticSnapshot() {
+      const errors = [];
+      const read = (key, label) => {
+        try {
+          const raw = localStorage.getItem(key);
+          if (raw == null) return [];
+          const rows = JSON.parse(raw);
+          if (!Array.isArray(rows) || rows.some((r) => !r || typeof r !== "object")) throw new Error("記録の配列形式ではありません");
+          return rows;
+        } catch (error) { errors.push(`${label}: ${error.message}`); return []; }
+      };
+      const snapshot = {
+        archive: read(OLD_MANUFACTURING_RECORDS_KEY, "旧v1製造履歴"),
+        local: read(MANUFACTURING_RECORDS_KEY, "現行local製造履歴"),
+        savedArchive: read(OLD_SAVED_RECIPE_CALCULATIONS_KEY, "旧v1保存済みレシピ"),
+        savedLocal: read(SAVED_RECIPE_CALCULATIONS_KEY, "現行保存済みレシピ"),
+        errors, capturedAt: new Date().toISOString()
+      };
+      const results = await Promise.allSettled([
+        window.MeatProductionSync.getLocalHistory(), window.MeatProductionSync.fetchCloudHistory({ lots: window.MeatHistoryDiagnostics.TARGETS.map((t) => t.lot) })
+      ]);
+      snapshot.indexed = results[0].status === "fulfilled" ? results[0].value : [];
+      if (results[1].status === "fulfilled" && results[1].value.length >= 1000) errors.push("Supabase取得上限の可能性があるため所在未確定");
+      snapshot.cloud = results[1].status === "fulfilled" ? results[1].value.map((row) => {
+        if (!Array.isArray(row.manufacturing_allocations)) errors.push(`Supabase内訳未取得: ${row.id}`);
+        return { record: row, allocations: row.manufacturing_allocations || [] };
+      }) : [];
+      results.forEach((r, index) => { if (r.status === "rejected") errors.push(`${index ? "Supabase" : "IndexedDB"}: ${r.reason.message || r.reason}`); });
+      return snapshot;
+    }
+
+    async function runPastManufacturingDiagnostics() {
+      if (crossDeviceIntegrationPromise) await crossDeviceIntegrationPromise.catch(() => {});
+      await window.MeatProductionSync.waitForIdle();
+      const snapshot = await collectPastManufacturingDiagnosticSnapshot();
+      const reports = window.MeatHistoryDiagnostics.TARGETS.map((t) => window.MeatHistoryDiagnostics.inspect(snapshot, t));
+      const recoverable = reports.filter((r) => r.canRecover);
+      if (recoverable.length) {
+        await initializeSupabaseMasterData();
+        if (window.MeatProductionMasterData) {
+          const master = await window.MeatProductionMasterData.refresh();
+          if (master && master.data) applySupabaseMasterData(master.data);
+        }
+      }
+      for (const report of recoverable) {
+        try {
+          const freshCloud = await window.MeatProductionSync.fetchCloudHistory({ lots: window.MeatHistoryDiagnostics.TARGETS.map((t) => t.lot) });
+          const before = snapshot.cloud.filter((b) => b.record.lot_number === report.lot);
+          const fresh = freshCloud.filter((r) => r.lot_number === report.lot);
+          if (JSON.stringify(before.map((b) => b.record)) !== JSON.stringify(fresh)) throw new Error("診断中にクラウド記録が変更されました。自動上書きしません。");
+          const existingCloud = before[0] && before[0].record;
+          const bundle = window.MeatProductionSyncAdapter.fromLegacy({ ...report.record,
+            createdAt: (existingCloud && existingCloud.created_at) || report.record.createdAt,
+            updatedAt: new Date().toISOString()
+          }, window.MEAT_SUPABASE_CONFIG || {}, window.MeatProductionSync);
+          if (bundle.record.lot_number !== report.lot) throw new Error("LOTが一致しません");
+          const cloudAllocations = before.flatMap((b) => b.allocations);
+          const result = await window.MeatProductionSync.upsertDiagnosticRecovery(bundle.record, bundle.allocations, cloudAllocations);
+          if (!result.synced) throw result.error;
+          const verified = await window.MeatProductionSync.fetchCloudHistory({ lots: window.MeatHistoryDiagnostics.TARGETS.map((t) => t.lot) });
+          const saved = verified.find((r) => r.id === bundle.record.id && r.lot_number === report.lot);
+          if (!saved) throw new Error("クラウド保存後の取得で記録を確認できません");
+          const actual = window.MeatHistoryRecovery.fromBundle({ record: saved, allocations: saved.manufacturing_allocations });
+          for (const [key, value] of Object.entries(report.quantities)) if (Number(actual[key]) !== value) throw new Error(`保存後の数量が一致しません: ${key}`);
+          const localBundles = await window.MeatProductionSync.getLocalHistory();
+          const local = localBundles.find((b) => b.record.id === bundle.record.id);
+          const localRecord = local && window.MeatHistoryRecovery.fromBundle(local);
+          for (const [key, value] of Object.entries(report.quantities)) if (!localRecord || Number(localRecord[key]) !== value) throw new Error(`端末保存後の数量が一致しません: ${key}`);
+          const canonical = { ...report.record, ...bundle.legacyRecordPatch, syncStatus: "synced", syncError: "", createdAt: bundle.record.created_at, updatedAt: bundle.record.updated_at };
+          const current = JSON.parse(localStorage.getItem(MANUFACTURING_RECORDS_KEY) || "[]");
+          const exists = current.some((r) => r.lot === report.lot);
+          const updated = current.map((r) => r.lot === report.lot ? { ...r, ...canonical } : r);
+          if (!exists) updated.push(canonical);
+          saveManufacturingRecords(updated);
+          report.result = `復旧済み（${Object.entries(report.quantities).map(([k, v]) => `${k}=${v}`).join(" / ")}・IndexedDB / Supabase確認済み`;
+        } catch (error) { report.result = `復旧未完了：${error.message || error}`; }
+      }
+      return { snapshot, reports, text: `過去データ診断\n取得日時: ${snapshot.capturedAt}\n対象3LOT・取得時の生データ（復旧前）\n\n` + reports.map(window.MeatHistoryDiagnostics.text).join("\n\n--------------------------------\n\n") };
+    }
+
+    async function showPastManufacturingDiagnostics() {
+      if (manufacturingDiagnosticRun) return;
+      manufacturingDiagnosticsVisible = true;
+      setHeader("過去データ診断", "対象3LOTを一括確認", true, () => showManufacturingRecordHistory());
+      app.innerHTML = `<section class="section"><h2>過去データ診断</h2><p role="status">実データを取得しています。明示製造数が一意に残っている場合だけ自動復旧します。</p></section>`;
+      manufacturingDiagnosticRun = runPastManufacturingDiagnostics();
+      try {
+        const result = await manufacturingDiagnosticRun;
+        if (!manufacturingDiagnosticsVisible) return;
+        app.innerHTML = result.reports.map((r) => `
+          <section class="section">
+            <h2>${escapeHtml(r.name)}</h2><div class="note">LOT: ${escapeHtml(r.lot)}</div>
+            <p>${escapeHtml(r.decision)}</p><p>${escapeHtml(r.result)}</p>
+            ${r.inference ? `<p>逆算可能候補：${r.inference.weight}g / ${r.inference.unit}g = ${r.inference.count}（自動確定なし）</p>` : ""}
+            ${r.incomplete.map((e) => `<p class="status error">${escapeHtml(e)}</p>`).join("")}
+            ${r.conflicts.map((e) => `<p class="status error">競合：${escapeHtml(e)}</p>`).join("")}
+            <details class="record-other"><summary>取得時のデータソース・値を表示</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:15px">${escapeHtml(window.MeatHistoryDiagnostics.text(r))}</pre></details>
+          </section>`).join("") + `<section class="section"><button id="pastDiagnosticCopy" class="secondary" type="button">診断結果をコピー</button><div id="pastDiagnosticCopyStatus" class="status" role="status"></div><textarea id="pastDiagnosticText" aria-label="診断結果" readonly></textarea></section>`;
+        document.getElementById("pastDiagnosticText").value = result.text;
+        document.getElementById("pastDiagnosticCopy").addEventListener("click", () => copyToClipboard(result.text, document.getElementById("pastDiagnosticCopyStatus")));
+      } catch (error) {
+        if (manufacturingDiagnosticsVisible) app.innerHTML = `<section class="section"><h2>診断未完了</h2><p class="status error">${escapeHtml(error.message || error)}</p><p>取得失敗のため「元データなし」とは判定していません。</p></section>`;
+      } finally { manufacturingDiagnosticRun = null; }
+    }
+
     async function refreshManufacturingHistory(showResult = false) {
+      if (manufacturingDiagnosticsVisible) return;
       if (window.MeatCrossDeviceSync) {
         await runCrossDeviceIntegration().catch(() => {});
       }
+      if (manufacturingDiagnosticsVisible) return;
       let localRecords = [];
       const legacyCount = loadManufacturingRecords().length;
       try {
@@ -2982,6 +3098,7 @@
         renderManufacturingRecordHistory(loadManufacturingRecords());
       }
       try {
+        if (manufacturingDiagnosticsVisible) return;
         const syncResult = await window.MeatProductionSync.refreshHistoryCache();
         const refreshed = await loadIndexedManufacturingHistory();
         const pendingCount = await window.MeatProductionSync.pendingCount().catch(() => 0);
@@ -3017,6 +3134,7 @@
     }
 
     function showManufacturingRecordHistory(backHandler = showManufacturingRecordTop, message = "") {
+      manufacturingDiagnosticsVisible = false;
       saveScreenState("recordHistory", ["home", "records", "history"]);
       setHeader("製造記録履歴", "保存した記録", true, backHandler);
       const records = loadManufacturingRecords();

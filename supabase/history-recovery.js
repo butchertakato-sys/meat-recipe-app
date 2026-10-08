@@ -138,6 +138,9 @@
   // Inference is only for absent or logically inconsistent zero quantities; within 0.01 of an integer (1% of one unit).
   function inferCount(record) {
     const result = { ...record };
+    // These LOTs now require the explicit-source diagnostic. Do not let a
+    // background history refresh turn a displayed inverse candidate into data.
+    if (global.MeatHistoryDiagnostics && global.MeatHistoryDiagnostics.TARGETS.some((t) => t.lot === result.lot)) return result;
     const code = global.MeatProductionSyncAdapter && global.MeatProductionSyncAdapter.internalCode(result);
     if (code === "HERB" || code === "GIBIER_CENTER") return result;
     const key = result.packagingUnit === "本" ? "completedCount" : "packageCount";

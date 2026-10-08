@@ -35,3 +35,25 @@ Real Windows/iPad browser data and authenticated production Supabase were not
 accessible for these tests. The regression demonstrates the recovery path and
 data preservation; it does not claim that particular production records have
 already been synchronized.
+
+The temporary **過去データ診断** button at the bottom of manufacturing history
+captures raw values for the three 2026-10-08 LOTs before recovery. It reads both
+localStorage generations, raw IndexedDB records and allocations, targeted cloud
+records and allocations, and linked saved recipe snapshots. Exact storage keys
+and null / empty / zero / absent values are included in the copyable report.
+
+Diagnostic quantity recovery accepts only a single explicit positive quantity
+per product field. Different positives or multiple cloud identities are reported
+as conflicts. Failed reads are reported as incomplete, never as confirmed absence.
+An integer inverse is displayed only as a candidate; the diagnostic does not use
+`inferCount`. Its dedicated IndexedDB/REST upsert path neither deletes allocations
+nor invokes the normal replacement RPC. Recovery is reported as successful only
+after both IndexedDB and cloud readback verification. The source snapshot in the
+report remains the pre-recovery snapshot, and v1 data stays unchanged.
+
+While the diagnostic is installed, automatic weight-based inference is disabled
+for its three target LOTs even during ordinary background history refreshes. This
+prevents the older recovery path from storing an inverse candidate before the
+raw diagnostic can establish whether an explicit quantity exists. Explicit
+historical quantities still recover normally; other LOTs keep their existing
+recovery behavior.
