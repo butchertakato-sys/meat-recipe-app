@@ -257,6 +257,40 @@
       margin-bottom: 14px;
     }
 
+    .record-basic-info {
+      padding: 12px 16px;
+      margin-bottom: 10px;
+    }
+
+    .record-basic-info h2 {
+      font-size: 22px;
+      margin-bottom: 8px;
+    }
+
+    .record-basic-info label {
+      font-size: 17px;
+      gap: 4px;
+    }
+
+    .record-basic-info .product-name {
+      font-size: 20px;
+      margin: 0;
+    }
+
+    .record-basic-info .record-basic-dates {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 8px;
+    }
+
+    .record-basic-info input {
+      min-width: 0;
+      min-height: 48px;
+      padding: 8px;
+      font-size: 18px;
+    }
+
     .record-primary-row {
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -1865,23 +1899,18 @@
       app.innerHTML = `
         <input id="recordSavedRecipeId" type="hidden" value="${escapeHtml(draft.recordSavedRecipeId || "")}">
         <select id="recordCategory" hidden><option value="自社レシピ">自社レシピ</option><option value="委託製造">委託製造</option></select>
-        <section class="section">
+        <section class="section record-basic-info">
           <h2>基本情報</h2>
-          <div class="record-primary-row">
+          <label>レシピ名
+            <select id="recordRecipe" hidden></select>
+            <div class="product-name" id="recordRecipeNameDisplay"></div>
+          </label>
+          <div class="record-basic-dates">
             <label>仕込日
               <input id="recordPrepDate" type="date" value="${todayString()}" readonly>
             </label>
-            <label>レシピ名
-              <select id="recordRecipe" hidden></select>
-              <div class="product-name" id="recordRecipeNameDisplay"></div>
-            </label>
-          </div>
-          <div class="field-row">
             <label>製造日
               <input id="recordDate" type="date" value="${todayString()}">
-            </label>
-            <label>製造ロット番号
-              <input id="recordLot" type="text" readonly>
             </label>
           </div>
         </section>
@@ -1937,6 +1966,9 @@
         <details class="section record-other">
           <summary><span class="record-other-open">＋ その他を入力</span><span class="record-other-close">－ その他を閉じる</span></summary>
           <div class="field-row">
+            <label>製造ロット番号
+              <input id="recordLot" type="text" readonly>
+            </label>
             <label>余り生地重量（g）
               <input id="recordLeftoverWeight" type="number" inputmode="decimal" min="0" step="0.1" value="0">
             </label>
