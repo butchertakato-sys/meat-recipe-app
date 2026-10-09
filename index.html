@@ -627,6 +627,7 @@
   <script src="supabase/offline-sync.js"></script>
   <script src="supabase/history-recovery.js"></script>
   <script src="supabase/app-sync-adapter.js"></script>
+  <script src="manufacturing-record-display.js"></script>
   <script src="manufacturing-analysis.js"></script>
   <script src="supabase/record-observation.js"></script>
   <style>
@@ -3041,6 +3042,7 @@
       const records = combinedManufacturingHistory(indexed);
       const pendingCount = window.MeatProductionSync ? await window.MeatProductionSync.pendingCount().catch(() => 0) : 0;
       if (view !== manufacturingHistoryView) return;
+      captureManufacturingDisplayWeights(indexed);
       renderManufacturingRecordHistory(records,
         message || (showResult && !syncError ? "最新データへ更新しました。" : ""),
         syncError ? "端末に保存されている製造履歴を表示しています。" : "",
@@ -3106,7 +3108,7 @@
           <div>製造日：${escapeHtml(record.date || "")}</div>
           ${hideCategory ? "" : `<div>製造区分：${escapeHtml(record.category || "")}</div>`}
           <div>レシピ名：${escapeHtml(record.recipeName || record.product || "")}</div>
-          ${packagingStandardHtml(packagingProductIdForRecord(record))}
+          ${historicalPackagingStandardHtml(record)}
           <div>ロット番号：${escapeHtml(record.lot || "")}</div>
           <div>肉重量合計：${formatRecordNumber(record.meatTotal)}g</div>
           <div>水：${formatRecordNumber(record.waterAmount)}g</div>

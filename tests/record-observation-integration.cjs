@@ -272,6 +272,51 @@ const base={id:'old-record',lot:'20261008-JI-ARABIKI-01',recipeName:'あらび�
  assert.equal((await history(N)).filter(r=>r.savedRecipeId==='gibier-new-fixture').length,2,'legitimate same-day manufacturing events retained');
  console.log('PASS restored draft after save failure keeps ID/LOT; retry no new reservation; same-day multiple manufacturing preserved');
 
+ // Historical packaging display uses record evidence only, never current masters.
+ cloud.clear();allocations.clear();const W=await device();
+ const w65={...make('20260728-IT-GIBIER-01',65),prepDate:'2026-07-27'};
+ const w70={...make('20260805-IT-GIBIER-01',70),date:'2026-08-05',prepDate:'2026-08-04'};
+ const wh={...base,id:id(),recipeCode:'HERB',recipeName:'ハーブ',recipeId:'own:herb',herbStandardPackageCount:10,herbEventPieceCount:20,herbStandardUnitWeightG:180,herbEventUnitWeightG:35,finishedWeight:2500,actualFinishedWeightG:2500};
+ await seed(W,[w65,w70,wh]);
+ const wu={...make('20260729-IT-GIBIER-01',65),id:id(),date:'2026-07-29'};wu.manufacturingRecordId=wu.cloudRecordId=wu.id;
+ for(const key of ['savedUnitWeightG','unitWeight','packWeight','finishedWeight','actualFinishedWeightG','yieldRate','actualYieldPercent'])delete wu[key];
+ const wi={...wu,id:id(),lot:'20260730-IT-GIBIER-01',date:'2026-07-30',finishedWeight:10530};wi.manufacturingRecordId=wi.cloudRecordId=wi.id;
+ await W.page.evaluate(({wu,wi})=>{const rows=JSON.parse(localStorage.getItem('manufacturingRecords'));rows.push(wu,wi);localStorage.setItem('manufacturingRecords',JSON.stringify(rows));}, {wu,wi});
+ const weightMark=requestLog.length;
+ const storedBefore=await W.page.evaluate(async()=>({records:localStorage.getItem('manufacturingRecords'),archive:localStorage.getItem('meatRecipeApp.manufacturingRecords.v1'),bundles:await MeatProductionSync.getLocalHistory()}));
+ await W.page.evaluate(()=>showManufacturingRecordHistory());
+ for(const [r,n]of [[w65,65],[w70,70]]){
+   await W.page.evaluate(r=>showManufacturingRecordDetail(r.id),r);
+   assert.match(await W.page.locator('.packaging-standard').innerText(),new RegExp(n+'g／本'));
+ }
+ await W.page.evaluate(()=>{const master=loadPackagingMaster();for(const r of master)if(r.productId==='PROD_GIBIER_CENTER'){r.unitWeightG=90;r.netWeightG=90;}localStorage.setItem('packagingMaster.v1',JSON.stringify(master));});
+ for(const [r,n]of [[w65,65],[w70,70]]){
+   await W.page.evaluate(r=>showManufacturingRecordDetail(r.id),r);
+   const summary=await W.page.locator('.record-summary').innerText();assert.match(summary,new RegExp(n+'g／本'));assert.ok(!summary.includes('90g／本'));
+ }
+ await W.page.evaluate(id=>showManufacturingRecordDetail(id),wu.id);assert.match(await W.page.locator('.packaging-standard').innerText(),/不明/);
+ await W.page.evaluate(id=>showManufacturingRecordDetail(id),wi.id);assert.match(await W.page.locator('.packaging-standard').innerText(),/65g／本（推定）/);
+ await W.page.evaluate(id=>showManufacturingRecordDetail(id),wh.id);assert.match(await W.page.locator('.packaging-standard').innerText(),/通常：180g／パック/);assert.match(await W.page.locator('.packaging-standard').innerText(),/イベント：35g／本/);
+ await W.page.evaluate(()=>showManufacturingAnalysis());
+ const list=W.page.locator('[aria-label="製造記録一覧"]');
+ assert.deepEqual(await list.locator('th').allTextContents(),['日付','仕込み日','商品','LOT','仕込み重量','完成重量','製造数','マスタ重量','歩留まり','備考']);
+ for(const [r,n]of [[w65,65],[w70,70]]){
+   const cells=await W.page.locator(`[data-analysis-id="${r.id}"] td`).allTextContents();assert.equal(cells[0],r.date.replaceAll('-','/'));assert.equal(cells[1],r.prepDate.replaceAll('-','/'));assert.equal(cells[7],n+'g／本');
+ }
+ assert.match(await W.page.locator(`[data-analysis-id="${wu.id}"] td`).nth(7).innerText(),/不明/);
+ assert.match(await W.page.locator(`[data-analysis-id="${wi.id}"] td`).nth(7).innerText(),/推定/);
+ assert.match(await W.page.locator(`[data-analysis-id="${wh.id}"] td`).nth(7).innerText(),/通常：180g／パック/);
+ assert.deepEqual(await W.page.locator('[aria-label="商品別集計表"] th').allTextContents(),['商品名','製造回数','総仕込み重量','総完成重量','総製造数','平均歩留まり']);
+ await W.page.selectOption('#analysisProduct','PROD_GIBIER_CENTER');assert.equal(await W.page.locator('[data-analysis-id]').count(),4);
+ await W.page.selectOption('#analysisPeriod','custom');await W.page.fill('#analysisStart','2026-08-05');await W.page.locator('#analysisStart').dispatchEvent('change');await W.page.fill('#analysisEnd','2026-08-05');await W.page.locator('#analysisEnd').dispatchEvent('change');assert.equal(await W.page.locator('[data-analysis-id]').count(),1,'filter uses manufacturing date, not prep date');
+ await W.page.selectOption('#analysisPeriod','all');await W.page.selectOption('#analysisOrder','oldest');assert.equal(await W.page.locator('[data-analysis-id]').first().getAttribute('data-analysis-id'),w65.id);
+ await W.page.selectOption('#analysisOrder','newest');assert.equal(await W.page.locator('[data-analysis-id]').first().getAttribute('data-analysis-id'),w70.id);
+ await W.page.setViewportSize({width:390,height:844});assert.equal(await W.page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);assert.equal(await list.evaluate(e=>e.scrollWidth>e.clientWidth),true);
+ await W.page.locator(`[data-analysis-id="${w70.id}"]`).click();assert.match(await W.page.locator('.packaging-standard').innerText(),/70g／本/);
+ assert.deepEqual(await W.page.evaluate(async()=>({records:localStorage.getItem('manufacturingRecords'),archive:localStorage.getItem('meatRecipeApp.manufacturingRecords.v1'),bundles:await MeatProductionSync.getLocalHistory()})),storedBefore);
+ assert.equal(requestLog.length,weightMark,'display/filter/detail make no cloud requests');
+ console.log('PASS saved packaging display: 65g/70g stable after master change, unknown/estimated, herb splits, prep date, column order, filters/sort/detail, mobile scroll, unchanged records/snapshots/weights/yields/IDB');
+
  // Diagnostic stays GET-only, bounded to target day and leaves business stores unchanged.
  cloud.clear();allocations.clear();
  const O=await device();const o1=make(lotA,65),o2={...make(lotB,70),createdAt:'2026-07-28T00:01:30Z',savedAt:'2026-07-28T00:01:30Z'};await seed(O,[o1,o2],[o1]);

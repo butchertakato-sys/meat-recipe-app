@@ -28,7 +28,8 @@ function manufacturingAnalysisRecord(record) {
     id: manufacturingRecordId(record),
     productId: productId || `${code}:${record.recipeName || record.product || ''}`,
     productName: productNameForId(productId) || record.recipeName || record.product || code,
-    category: record.category || '', date: record.date || '', lot: record.lot || '', memo: record.memo || '',
+    category: record.category || '', date: record.date || '', prepDate: record.prepDate || '', lot: record.lot || '', memo: record.memo || '',
+    savedWeights: manufacturingSavedWeightEntries(manufacturingDisplaySource(record)),
     preparationWeightG: analysisNumber(record.theoreticalFinishedWeight),
     finishedWeightG: analysisNumber(record.actualFinishedWeightG ?? record.finishedWeight),
     yieldPercent: analysisNumber(record.actualYieldPercent ?? record.yieldRate),
@@ -89,6 +90,7 @@ async function showManufacturingAnalysis() {
     if (window.MeatProductionSync) indexed = (await window.MeatProductionSync.getLocalHistory()).map(cachedBundleToManufacturingRecord);
   } catch (_) { notice = '端末DBを読み込めないため、既存キャッシュの履歴を表示しています。'; }
   if (!host.isConnected) return;
+  captureManufacturingDisplayWeights(indexed);
   const records = combinedManufacturingHistory(indexed).map(manufacturingAnalysisRecord);
   const products = new Map(PRODUCT_MASTER.map(p => [p.productId, p.productName]));
   records.forEach(r => products.set(r.productId, r.productName));
@@ -119,7 +121,7 @@ async function showManufacturingAnalysis() {
     const selected = filterManufacturingRecords(records, { ...range, productId: field('Product').value, category: field('Category').value, order: field('Order').value });
     const grouped = aggregateManufacturingRecords(selected);
     field('Status').textContent = `${selected.length}件${range.start ? ` ／ ${range.start} ～ ${range.end}` : ''}`;
-    field('Results').innerHTML = `<h2>製造記録一覧</h2>${selected.length ? table(['日付', '商品', 'LOT', '仕込み重量', '完成重量', '製造数', '歩留まり', '備考'], selected.map(r => `<tr data-analysis-id="${escapeHtml(r.id)}" tabindex="0" style="cursor:pointer"><td>${escapeHtml(r.date.replace(/-/g, '/') || '－')}</td><td><button type="button" class="secondary">${escapeHtml(r.productName)}</button></td><td>${escapeHtml(r.lot || '－')}</td><td>${weight(r.preparationWeightG)}</td><td>${weight(r.finishedWeightG)}</td><td>${quantities(r.quantities)}</td><td>${percent(r.yieldPercent)}</td><td style="white-space:pre-wrap">${escapeHtml(r.memo || '－')}</td></tr>`).join(''), 1000) : '<p class="empty">条件に一致する製造記録はありません。</p>'}
+    field('Results').innerHTML = `<h2>製造記録一覧</h2>${selected.length ? table(['日付', '仕込み日', '商品', 'LOT', '仕込み重量', '完成重量', '製造数', 'マスタ重量', '歩留まり', '備考'], selected.map(r => `<tr data-analysis-id="${escapeHtml(r.id)}" tabindex="0" style="cursor:pointer"><td>${escapeHtml(r.date.replace(/-/g, '/') || '－')}</td><td>${escapeHtml(r.prepDate.replace(/-/g, '/') || '－')}</td><td><button type="button" class="secondary">${escapeHtml(r.productName)}</button></td><td>${escapeHtml(r.lot || '－')}</td><td>${weight(r.preparationWeightG)}</td><td>${weight(r.finishedWeightG)}</td><td>${quantities(r.quantities)}</td><td>${manufacturingSavedWeightHtml(r.savedWeights)}</td><td>${percent(r.yieldPercent)}</td><td style="white-space:pre-wrap">${escapeHtml(r.memo || '－')}</td></tr>`).join(''), 1200) : '<p class="empty">条件に一致する製造記録はありません。</p>'}
       <h2>商品別集計表</h2><p class="note">仕込み重量＝既存歩留まりの分母（理論重量）。平均歩留まり＝完成重量と正の仕込み重量が揃った記録の総完成重量 ÷ 総仕込み重量 × 100。未設定値は合計から除外し、件数を併記します。</p>
       ${grouped.length ? table(['商品名', '製造回数', '総仕込み重量', '総完成重量', '総製造数', '平均歩留まり'], grouped.map(g => `<tr><td>${escapeHtml(g.productName)}</td><td>${g.count}回</td><td>${weight(g.preparationWeightG, g.missingPreparation)}</td><td>${weight(g.finishedWeightG, g.missingFinished)}</td><td>${quantities(g.quantities)}</td><td>${percent(g.yieldPercent)}<br>対象 ${g.yieldCount}/${g.count}件</td></tr>`).join(''), 800) : '<p class="empty">集計対象はありません。</p>'}`;
     field('Results').querySelectorAll('[data-analysis-id]').forEach(row => {
