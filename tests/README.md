@@ -57,3 +57,23 @@ prevents the older recovery path from storing an inverse candidate before the
 raw diagnostic can establish whether an explicit quantity exists. Explicit
 historical quantities still recover normally; other LOTs keep their existing
 recovery behavior.
+
+## Sync orchestration regression
+
+`npm test` also records request counts for startup, record-top navigation,
+explicit history refresh, and retry. To reproduce the same measurement against
+pre-change main, run `SYNC_BASELINE=1 node tests/sync-integration.cjs`; only the
+served application HTML and offline-sync module are loaded from commit
+`332ca834d2ca60d120b8eedba20271a836b532a9`. The worktree is not changed.
+
+With an empty cloud and no pending records, manufacturing-record GET counts
+before/after are startup 2/2, top 2/0, refresh 3/2, retry 2/2. Record POST,
+allocation POST and RPC counts are all zero for both runs. The remaining two
+GETs are the existing migration comparison and one cache pull; migration and
+recovery algorithms are unchanged. Instrumented startup/retry traces verify
+that the standalone pre-orchestrator syncPending call is gone.
+
+Additional browser checks exercise offline save with failed mock network,
+online-event delivery, explicit retrieval on another device, fallback without
+CrossDeviceSync, and unchanged CHORIZO 37 / ARABIKI 11 / HERB 0/161 quantities
+through save, mock cloud and second-device display.

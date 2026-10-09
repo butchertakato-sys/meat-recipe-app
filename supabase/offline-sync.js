@@ -520,7 +520,6 @@
     await openDatabase();
     global.addEventListener("online", () => refreshHistoryCache().catch(() => {}));
     await emitPendingCount();
-    if (global.navigator.onLine) syncPending().catch(() => {});
     return { pendingCount: await pendingCount(), cloudConfigured: cloudConfigured() };
   }
 

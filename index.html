@@ -1158,7 +1158,7 @@
     async function retryManufacturingSync(showMessage = true) {
       try {
         await initializeManufacturingSync();
-        await window.MeatProductionSync.syncPending();
+        await runCrossDeviceIntegration();
         const count = await window.MeatProductionSync.pendingCount();
         refreshManufacturingSyncStatus(count);
         if (showMessage) showSaveToast(count ? `未同期の製造記録が${count}件あります。` : "同期しました。");
@@ -1284,7 +1284,10 @@
     }
 
     async function runCrossDeviceIntegration() {
-      if (!window.MeatCrossDeviceSync) return null;
+      if (!window.MeatCrossDeviceSync) {
+        await initializeManufacturingSync();
+        return { historyRefresh: await window.MeatProductionSync.refreshHistoryCache() };
+      }
       if (crossDeviceIntegrationPromise) return crossDeviceIntegrationPromise;
       crossDeviceIntegrationPromise = (async () => {
         await initializeManufacturingSync();
@@ -1300,7 +1303,7 @@
           }
         });
         if (result && result.state === "synced" && window.MeatProductionSync) {
-          await window.MeatProductionSync.refreshHistoryCache().catch(() => {});
+          result.historyRefresh = await window.MeatProductionSync.refreshHistoryCache().catch(() => null);
         }
         const status = document.getElementById("crossDeviceSyncStatus");
         if (status) status.textContent = crossDeviceSyncStatusText();
@@ -1325,8 +1328,9 @@
     function startApplication() {
       if (applicationStarted) return;
       applicationStarted = true;
-      initializeManufacturingSync().then((result) => refreshManufacturingSyncStatus(result.pendingCount)).catch(() => {});
-      initializeSupabaseMasterData().then(() => runCrossDeviceIntegration()).catch(() => {});
+      initializeManufacturingSync()
+        .then((result) => { refreshManufacturingSyncStatus(result.pendingCount); return initializeSupabaseMasterData(); })
+        .then(() => runCrossDeviceIntegration()).catch(() => {});
       const state = loadScreenState();
       if (state) {
         showRestorePrompt(state);
@@ -1528,10 +1532,8 @@
       `;
       document.getElementById("manufacturingSyncRetry").addEventListener("click", async () => {
         await retryManufacturingSync(true);
-        await runCrossDeviceIntegration().catch(() => {});
       });
       initializeManufacturingSync().then(() => window.MeatProductionSync.pendingCount()).then(refreshManufacturingSyncStatus).catch(() => {});
-      runCrossDeviceIntegration().catch(() => {});
     }
 
     const PRODUCT_MASTER = [
@@ -3079,9 +3081,7 @@
 
     async function refreshManufacturingHistory(showResult = false) {
       if (manufacturingDiagnosticsVisible) return;
-      if (window.MeatCrossDeviceSync) {
-        await runCrossDeviceIntegration().catch(() => {});
-      }
+      const integrationResult = await runCrossDeviceIntegration().catch(() => null);
       if (manufacturingDiagnosticsVisible) return;
       let localRecords = [];
       const legacyCount = loadManufacturingRecords().length;
@@ -3099,7 +3099,9 @@
       }
       try {
         if (manufacturingDiagnosticsVisible) return;
-        const syncResult = await window.MeatProductionSync.refreshHistoryCache();
+        const syncResult = integrationResult && integrationResult.historyRefresh
+          ? integrationResult.historyRefresh
+          : await window.MeatProductionSync.refreshHistoryCache();
         const refreshed = await loadIndexedManufacturingHistory();
         const pendingCount = await window.MeatProductionSync.pendingCount().catch(() => 0);
         renderManufacturingRecordHistory(

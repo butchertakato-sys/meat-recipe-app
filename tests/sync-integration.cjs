@@ -4,6 +4,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
+const {execFileSync}=require('node:child_process');
+const baseline=process.env.SYNC_BASELINE==='1';
 const root = path.resolve(__dirname, '..');
 const id = () => crypto.randomUUID();
 const codes = ['ARABIKI','CHEESE','HERB','CHORIZO','ADDITIVE_FREE_ARABIKI','YAMAGOYA','GIBIER_CENTER','TOUGE','ZANZATEI'];
@@ -24,7 +26,7 @@ async function mock(route){
  const req=route.request(),url=new URL(req.url()),table=url.pathname.split('/').pop(),method=req.method();
  if(url.hostname==='app.test') {
    let file=path.join(root,url.pathname==='/'?'index.html':url.pathname);
-   try {let body=fs.readFileSync(file);if(file.endsWith('index.html'))body=body.toString().replace('    initApp();','    // Controlled initialization in isolated integration tests.');return route.fulfill({body,contentType:file.endsWith('.js')?'application/javascript':'text/html'});}catch{ return route.abort(); }
+   try {let body=baseline && ['index.html','supabase/offline-sync.js'].includes(path.relative(root,file)) ? execFileSync('git',['show','332ca834d2ca60d120b8eedba20271a836b532a9:'+path.relative(root,file)],{cwd:root}) : fs.readFileSync(file);if(file.endsWith('offline-sync.js'))body=body.toString().replace('async function syncPending() {', 'async function syncPending() { (window.syncTrace ||= []).push("syncPending");');if(file.endsWith('index.html'))body=body.toString().replace('    initApp();','    // Controlled initialization in isolated integration tests.');return route.fulfill({body,contentType:file.endsWith('.js')?'application/javascript':'text/html'});}catch{ return route.abort(); }
  }
  if(url.hostname!=='supabase.test') {if(url.hostname!=='cdn.jsdelivr.net')unexpected.push(req.url());return route.abort();}
  requestLog.push({table,method,body:method==='GET'?null:req.postDataJSON()});
@@ -52,8 +54,91 @@ async function mock(route){
 const base={id:'old-record',lot:'20261008-JI-ARABIKI-01',recipeName:'あらびき',category:'自社レシピ',prepDate:'2026-10-08',date:'2026-10-08',meatTotal:5000,meat6mm:5000,meat3mm:0,totalWeight:6000,theoreticalFinishedWeight:6000,packageCount:25,packagingUnit:'パック',savedUnitWeightG:180,yieldRate:78,finishedWeight:4500,lossCount:0,memo:'archive memo'};
 (async()=>{
  const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:true,args:['--no-sandbox']});const errors=[];
- async function device(){const context=await browser.newContext({viewport:{width:820,height:1180}});await context.route('**/*',mock);await context.addInitScript(()=>{window.MEAT_SUPABASE_CONFIG={enabled:true,url:'https://supabase.test',publishableKey:'test-key',businessId:'business',accessToken:'test-token'};Object.defineProperty(navigator,'onLine',{get:()=>false});});const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));await page.goto('http://app.test/');await page.evaluate(async()=>{await initializeManufacturingSync();await initializeSupabaseMasterData();MeatCrossDeviceSync.initialize(MEAT_SUPABASE_CONFIG);});return {context,page};}
+ async function device(raw=false){const context=await browser.newContext({viewport:{width:820,height:1180}});await context.route('**/*',mock);await context.addInitScript(()=>{window.MEAT_SUPABASE_CONFIG={enabled:true,url:'https://supabase.test',publishableKey:'test-key',businessId:'business',accessToken:'test-token'};window.testOnline=false;Object.defineProperty(navigator,'onLine',{get:()=>window.testOnline});});const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));await page.goto('http://app.test/');if(!raw)await page.evaluate(async()=>{await initializeManufacturingSync();await initializeSupabaseMasterData();MeatCrossDeviceSync.initialize(MEAT_SUPABASE_CONFIG);});return {context,page};}
  try {
+ // Compare identical empty-cloud operations against the pinned pre-change main.
+ const perf=await device(true);
+ await perf.page.evaluate(()=>{
+   window.testOnline=true;window.syncTrace=[];
+   const original=MeatCrossDeviceSync.syncAll;
+   MeatCrossDeviceSync.syncAll=async(...args)=>{syncTrace.push('crossBegin');try{return await original(...args);}finally{syncTrace.push('crossEnd');}};
+ });
+ const countRequests=rows=>({recordsGET:rows.filter(r=>r.table==='manufacturing_records'&&r.method==='GET').length,recordsPOST:rows.filter(r=>r.table==='manufacturing_records'&&r.method==='POST').length,allocationsPOST:rows.filter(r=>r.table==='manufacturing_allocations'&&r.method==='POST').length,RPC:rows.filter(r=>['save_manufacturing_record','reserve_manufacturing_lot'].includes(r.table)).length});
+ const measurements={};
+ let mark=requestLog.length;
+ await perf.page.evaluate(()=>startApplication());
+ await perf.page.waitForFunction(()=>MeatCrossDeviceSync.getStatus().state==='synced' && !crossDeviceIntegrationPromise);
+ measurements.startup=countRequests(requestLog.slice(mark));
+ const trace=await perf.page.evaluate(()=>syncTrace);
+ if(!baseline)assert.equal(trace[0],'crossBegin','startup must not launch standalone syncPending');
+ mark=requestLog.length;await perf.page.evaluate(()=>showManufacturingRecordTop());
+ await perf.page.waitForFunction(()=>document.getElementById('manufacturingSyncStatus').textContent!=='未同期：確認中' && !crossDeviceIntegrationPromise);
+ measurements.top=countRequests(requestLog.slice(mark));
+ if(!baseline)assert.deepEqual(measurements.top,{recordsGET:0,recordsPOST:0,allocationsPOST:0,RPC:0});
+ mark=requestLog.length;await perf.page.evaluate(()=>refreshManufacturingHistory(true));
+ measurements.refresh=countRequests(requestLog.slice(mark));
+ if(!baseline)assert.equal(measurements.refresh.recordsGET,2,'one migration comparison GET and one cache pull GET');
+ mark=requestLog.length;await perf.page.locator('#manufacturingSyncRetry').count().then(async()=>{
+   await perf.page.evaluate(()=>showManufacturingRecordTop());
+   await perf.page.waitForFunction(()=>!crossDeviceIntegrationPromise);
+   mark=requestLog.length;
+   await perf.page.evaluate(()=>{syncTrace=[];});
+   await perf.page.locator('#manufacturingSyncRetry').click();
+   await perf.page.waitForFunction(()=>syncTrace.includes('crossEnd')&&!crossDeviceIntegrationPromise);
+ });
+ measurements.retry=countRequests(requestLog.slice(mark));
+ if(!baseline){const retryTrace=await perf.page.evaluate(()=>syncTrace);assert.equal(retryTrace[0],'crossBegin');assert.equal(retryTrace.filter(t=>t==='crossBegin').length,1);}
+ console.log('REQUEST COUNTS '+(baseline?'BEFORE':'AFTER')+' '+JSON.stringify(measurements));
+ console.log('SYNC TRACE startup '+JSON.stringify(trace)+' retry '+JSON.stringify(await perf.page.evaluate(()=>syncTrace)));
+ await perf.context.close();
+ if(baseline)return;
+ // Online event still flushes an offline-first bundle; another device can explicitly pull it.
+ const reconnect=await device();
+ const reconnectId=id();
+ await reconnect.page.route('https://supabase.test/**',route=>route.abort());
+ await reconnect.page.evaluate(async({base,reconnectId})=>{
+   const r={...base,id:reconnectId,cloudRecordId:reconnectId,lot:'20261009-JI-ARABIKI-99',recipeCode:'ARABIKI',recipeId:'own:arabiki',packageCount:11};
+   const bundle=MeatProductionSyncAdapter.fromLegacy(r,MEAT_SUPABASE_CONFIG,MeatProductionSync);
+   await MeatProductionSync.saveAndSync(bundle.record,bundle.allocations);
+ },{base,reconnectId});
+ assert.ok(!cloud.has(reconnectId));
+ await reconnect.page.unroute('https://supabase.test/**');
+ await reconnect.page.evaluate(async()=>{window.testOnline=true;window.dispatchEvent(new Event('online'));await MeatProductionSync.waitForIdle();});
+ assert.ok(cloud.has(reconnectId));assert.equal([...allocations.values()].find(a=>a.manufacturing_record_id===reconnectId&&a.allocation_type==='STANDARD').quantity,11);
+ const receiver=await device();await receiver.page.evaluate(()=>refreshManufacturingHistory(true));
+ assert.ok((await receiver.page.evaluate(()=>loadIndexedManufacturingHistory())).some(r=>r.cloudRecordId===reconnectId&&Number(r.packageCount)===11));
+ console.log('PASS offline save → online event → Supabase → explicit refresh on second device');
+ // Fallback remains available when the cross-device module is absent.
+ await receiver.page.evaluate(async()=>{
+   const cross=window.MeatCrossDeviceSync;window.MeatCrossDeviceSync=null;
+   try {const result=await runCrossDeviceIntegration();if(!result.historyRefresh)throw Error('missing fallback pull');}
+   finally {window.MeatCrossDeviceSync=cross;}
+ });
+ // Preserve actual recovered counts through unchanged offline-first save and a second-device pull.
+ await reconnect.page.evaluate(async(base)=>{
+   for(const values of [
+     {recipeName:'チョリソー',recipeCode:'CHORIZO',packageCount:37,lot:'20261008-JI-CHORIZO-01'},
+     {recipeName:'あらびき',recipeCode:'ARABIKI',packageCount:11,lot:'20261008-JI-ARABIKI-01'},
+     {recipeName:'ハーブ',recipeCode:'HERB',herbStandardPackageCount:0,herbEventPieceCount:161,lot:'20261008-JI-HERB-01'}
+   ]){
+     const record={...base,...values,id:MeatProductionSync.uuid(),herbStandardUnitWeightG:180,herbEventUnitWeightG:35};
+     const bundle=MeatProductionSyncAdapter.fromLegacy(record,MEAT_SUPABASE_CONFIG,MeatProductionSync);
+     const result=await MeatProductionSync.saveAndSync(bundle.record,bundle.allocations);if(!result.synced)throw Error('actual quantity fixture sync failed');
+   }
+ },base);
+ await receiver.page.evaluate(()=>refreshManufacturingHistory(true));
+ await receiver.page.evaluate(async()=>{
+   const records=await loadIndexedManufacturingHistory();
+   for(const [code,count] of [['CHORIZO',37],['ARABIKI',11]]){
+     const record=records.find(r=>r.lot==='20261008-JI-'+code+'-01');
+     if(Number(record.packageCount)!==count||!manufacturingRecordReadHtml(record).includes('包装数：'+count))throw Error('quantity roundtrip lost '+code);
+   }
+   const herb=records.find(r=>r.lot==='20261008-JI-HERB-01');
+   if(Number(herb.herbStandardPackageCount)!==0||Number(herb.herbEventPieceCount)!==161)throw Error('herb roundtrip lost');
+ });
+ console.log('PASS missing-cross-device fallback and actual quantity roundtrip: CHORIZO 37, ARABIKI 11, HERB 0/161');
+
+ await reconnect.context.close();await receiver.context.close();cloud.clear();allocations.clear();
  const a=await device(),page=a.page;
  // Real observed quantities with contaminating herb zero fields: exercise rendered list,
  // detail, edit and GoodNotes without changing or normalizing the records first.
