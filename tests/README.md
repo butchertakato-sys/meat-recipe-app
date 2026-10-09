@@ -36,44 +36,33 @@ accessible for these tests. The regression demonstrates the recovery path and
 data preservation; it does not claim that particular production records have
 already been synchronized.
 
-The temporary **過去データ診断** button at the bottom of manufacturing history
-captures raw values for the three 2026-10-08 LOTs before recovery. It reads both
-localStorage generations, raw IndexedDB records and allocations, targeted cloud
-records and allocations, and linked saved recipe snapshots. Exact storage keys
-and null / empty / zero / absent values are included in the copyable report.
+## Sync orchestration and cleanup regression
 
-Diagnostic quantity recovery accepts only a single explicit positive quantity
-per product field. Different positives or multiple cloud identities are reported
-as conflicts. Failed reads are reported as incomplete, never as confirmed absence.
-An integer inverse is displayed only as a candidate; the diagnostic does not use
-`inferCount`. Its dedicated IndexedDB/REST upsert path neither deletes allocations
-nor invokes the normal replacement RPC. Recovery is reported as successful only
-after both IndexedDB and cloud readback verification. The source snapshot in the
-report remains the pre-recovery snapshot, and v1 data stays unchanged.
+`npm test` records request counts for startup, record-top navigation, explicit
+history refresh, retry, new save and offline-to-online delivery. Run
+`SYNC_BASELINE=1 node tests/sync-integration.cjs` to measure the same scenarios
+against `b070188bcd3a8366912d4ec6293941eacd0339d2`. Only served production sources
+are read from Git; the worktree stays unchanged. `SYNC_BASELINE_REF` can select
+another reference for historical comparison.
 
-While the diagnostic is installed, automatic weight-based inference is disabled
-for its three target LOTs even during ordinary background history refreshes. This
-prevents the older recovery path from storing an inverse candidate before the
-raw diagnostic can establish whether an explicit quantity exists. Explicit
-historical quantities still recover normally; other LOTs keep their existing
-recovery behavior.
+Before/after record GET counts are startup 2/2, top 0/0, refresh 2/2, retry 2/2,
+new save 1/1, and online recovery 2/2. All record/allocation POST counts are zero
+in these RPC-enabled fixtures. New save and online recovery each use one RPC;
+other measured scenarios use none. The two ordinary integration GETs are the
+existing migration comparison and one cache pull. Online recovery requires a
+cloud comparison to rebuild pending bundles and then the cache pull.
 
-## Sync orchestration regression
+Migration uploads previously invoked cache pull twice (background save plus
+orchestrator). They now suppress the background save pull and refresh once at
+the end. The single-upload migration benchmark stays at three GETs (initial
+comparison, identity readback, cache pull), and one RPC; invocation count falls
+from two to one. A partial integration still refreshes after successful uploads
+without separately retrying deferred records. Normal saves retain background
+refresh, offline-first writes and the original data format.
 
-`npm test` also records request counts for startup, record-top navigation,
-explicit history refresh, and retry. To reproduce the same measurement against
-pre-change main, run `SYNC_BASELINE=1 node tests/sync-integration.cjs`; only the
-served application HTML and offline-sync module are loaded from commit
-`332ca834d2ca60d120b8eedba20271a836b532a9`. The worktree is not changed.
-
-With an empty cloud and no pending records, manufacturing-record GET counts
-before/after are startup 2/2, top 2/0, refresh 3/2, retry 2/2. Record POST,
-allocation POST and RPC counts are all zero for both runs. The remaining two
-GETs are the existing migration comparison and one cache pull; migration and
-recovery algorithms are unchanged. Instrumented startup/retry traces verify
-that the standalone pre-orchestrator syncPending call is gone.
-
-Additional browser checks exercise offline save with failed mock network,
-online-event delivery, explicit retrieval on another device, fallback without
-CrossDeviceSync, and unchanged CHORIZO 37 / ARABIKI 11 / HERB 0/161 quantities
-through save, mock cloud and second-device display.
+Browser checks cover offline save with failed mock network, online-event
+delivery, explicit retrieval on another device, fallback without CrossDeviceSync,
+actual CHORIZO 37 / ARABIKI 11 / HERB 0/161 quantities, normal entry UI,
+history/detail/edit/GoodNotes, LOT conflict protection and RPC/REST fallback.
+Cleanup tests enforce absence of temporary production references and LOT-specific
+exceptions. See `cleanup-audit.md` for the completed source/history audit.

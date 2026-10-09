@@ -26,7 +26,7 @@ async function mock(route){
  const req=route.request(),url=new URL(req.url()),table=url.pathname.split('/').pop(),method=req.method();
  if(url.hostname==='app.test') {
    let file=path.join(root,url.pathname==='/'?'index.html':url.pathname);
-   try {let body=baseline && ['index.html','supabase/offline-sync.js'].includes(path.relative(root,file)) ? execFileSync('git',['show','332ca834d2ca60d120b8eedba20271a836b532a9:'+path.relative(root,file)],{cwd:root}) : fs.readFileSync(file);if(file.endsWith('offline-sync.js'))body=body.toString().replace('async function syncPending() {', 'async function syncPending() { (window.syncTrace ||= []).push("syncPending");');if(file.endsWith('index.html'))body=body.toString().replace('    initApp();','    // Controlled initialization in isolated integration tests.');return route.fulfill({body,contentType:file.endsWith('.js')?'application/javascript':'text/html'});}catch{ return route.abort(); }
+   try {let body=baseline && ['index.html','supabase/offline-sync.js','supabase/history-recovery.js','supabase/cross-device-sync.js'].includes(path.relative(root,file)) ? execFileSync('git',['show',(process.env.SYNC_BASELINE_REF||'b070188bcd3a8366912d4ec6293941eacd0339d2')+':'+path.relative(root,file)],{cwd:root}) : fs.readFileSync(file);if(file.endsWith('offline-sync.js'))body=body.toString().replace('async function syncPending() {', 'async function syncPending() { (window.syncTrace ||= []).push("syncPending");').replace('async function pullHistoryFromCloud() {','async function pullHistoryFromCloud() { window.pullCalls = (window.pullCalls || 0) + 1;').replace('() => refreshHistoryCache().catch(() => {})','() => (window.onlineSyncPromise = refreshHistoryCache()).catch(() => {})').replace('() => pullHistoryFromCloud().catch(() => {})','() => (window.savePullPromise = pullHistoryFromCloud()).catch(() => {})');if(file.endsWith('index.html'))body=body.toString().replace('    initApp();','    // Controlled initialization in isolated integration tests.');return route.fulfill({body,contentType:file.endsWith('.js')?'application/javascript':'text/html'});}catch{ return route.abort(); }
  }
  if(url.hostname!=='supabase.test') {if(url.hostname!=='cdn.jsdelivr.net')unexpected.push(req.url());return route.abort();}
  requestLog.push({table,method,body:method==='GET'?null:req.postDataJSON()});
@@ -88,10 +88,55 @@ const base={id:'old-record',lot:'20261008-JI-ARABIKI-01',recipeName:'あらび�
  });
  measurements.retry=countRequests(requestLog.slice(mark));
  if(!baseline){const retryTrace=await perf.page.evaluate(()=>syncTrace);assert.equal(retryTrace[0],'crossBegin');assert.equal(retryTrace.filter(t=>t==='crossBegin').length,1);}
+ // Include successful new save and offline-to-online delivery in the same benchmark.
+ async function benchmarkSave(offline){
+   await perf.page.evaluate(()=>{window.savePullPromise=null;});
+   const recordId=id();
+   if(offline)await perf.page.route('https://supabase.test/**',r=>r.abort());
+   const start=requestLog.length;
+   await perf.page.evaluate(async({base,recordId})=>{
+     const record={...base,id:recordId,cloudRecordId:recordId,lot:'20261009-JI-ARABIKI-'+recordId,recipeCode:'ARABIKI',recipeId:'own:arabiki',packageCount:11};
+     const bundle=MeatProductionSyncAdapter.fromLegacy(record,MEAT_SUPABASE_CONFIG,MeatProductionSync);
+     await MeatProductionSync.saveAndSync(bundle.record,bundle.allocations);
+   },{base,recordId});
+   let deliveryStart=start;
+   if(offline){
+     assert.ok(!cloud.has(recordId));await perf.page.unroute('https://supabase.test/**');
+     deliveryStart=requestLog.length;await perf.page.evaluate(()=>window.dispatchEvent(new Event('online')));
+   }
+   if(offline)await perf.page.evaluate(()=>window.onlineSyncPromise);
+   else {await perf.page.waitForFunction(()=>Boolean(window.savePullPromise));await perf.page.evaluate(()=>window.savePullPromise);}
+   assert.ok(cloud.has(recordId));
+   return countRequests(requestLog.slice(deliveryStart));
+ }
+ measurements.newSave=await benchmarkSave(false);
+ measurements.offlineOnline=await benchmarkSave(true);
+ if(!baseline){assert.equal(measurements.newSave.recordsGET,1);assert.equal(measurements.offlineOnline.recordsGET,2);}
+ // Migration uploads already have an orchestrated final cache pull.
+ const migrationPerf=await device();
+ await migrationPerf.page.evaluate(base=>localStorage.setItem('manufacturingRecords',JSON.stringify([{...base,id:MeatProductionSync.uuid(),lot:'20261009-JI-ARABIKI-MIGRATION',recipeCode:'ARABIKI'}])),base);
+ const migrationMark=requestLog.length;
+ await migrationPerf.page.evaluate(async()=>{window.pullCalls=0;await runCrossDeviceIntegration();if(window.savePullPromise)await window.savePullPromise;});
+ measurements.migrationSync=countRequests(requestLog.slice(migrationMark));
+ const migrationPullCalls=await migrationPerf.page.evaluate(()=>window.pullCalls);
+ if(!baseline)assert.equal(migrationPullCalls,1);
+ console.log('MIGRATION CACHE PULL CALLS '+(baseline?'BEFORE':'AFTER')+' '+migrationPullCalls);
+ await migrationPerf.context.close();
+ if(!baseline){
+   const partialPerf=await device();
+   await partialPerf.page.route('https://supabase.test/rest/v1/saved_recipe_calculations**',r=>json(r,{message:'schema unavailable fixture'},404));
+   await partialPerf.page.evaluate(base=>localStorage.setItem('manufacturingRecords',JSON.stringify([{...base,id:MeatProductionSync.uuid(),lot:'20261009-JI-ARABIKI-PARTIAL',recipeCode:'ARABIKI'}])),base);
+   const partial=await partialPerf.page.evaluate(async()=>{window.pullCalls=0;const result=await runCrossDeviceIntegration();return {state:result.state,uploaded:result.manufacturing.uploaded,pulls:window.pullCalls,refreshed:Boolean(result.historyRefresh)};});
+   assert.equal(partial.state,'partial');assert.equal(partial.uploaded,1);assert.equal(partial.pulls,1);assert.equal(partial.refreshed,true);
+   await partialPerf.context.close();
+   console.log('PASS partial integration retains cache refresh after successful migration upload');
+ }
+
  console.log('REQUEST COUNTS '+(baseline?'BEFORE':'AFTER')+' '+JSON.stringify(measurements));
- console.log('SYNC TRACE startup '+JSON.stringify(trace)+' retry '+JSON.stringify(await perf.page.evaluate(()=>syncTrace)));
+ console.log('SYNC TRACE startup '+JSON.stringify(trace));
  await perf.context.close();
  if(baseline)return;
+ cloud.clear();allocations.clear();
  // Online event still flushes an offline-first bundle; another device can explicitly pull it.
  const reconnect=await device();
  const reconnectId=id();
@@ -103,7 +148,8 @@ const base={id:'old-record',lot:'20261008-JI-ARABIKI-01',recipeName:'あらび�
  },{base,reconnectId});
  assert.ok(!cloud.has(reconnectId));
  await reconnect.page.unroute('https://supabase.test/**');
- await reconnect.page.evaluate(async()=>{window.testOnline=true;window.dispatchEvent(new Event('online'));await MeatProductionSync.waitForIdle();});
+ await reconnect.page.evaluate(async()=>{window.testOnline=true;window.dispatchEvent(new Event('online'));await window.onlineSyncPromise;});
+ await reconnect.page.waitForFunction(async id=>(await MeatProductionSync.getLocalHistory()).some(b=>b.record.id===id&&b.record.sync_status==='synced'),reconnectId);
  assert.ok(cloud.has(reconnectId));assert.equal([...allocations.values()].find(a=>a.manufacturing_record_id===reconnectId&&a.allocation_type==='STANDARD').quantity,11);
  const receiver=await device();await receiver.page.evaluate(()=>refreshManufacturingHistory(true));
  assert.ok((await receiver.page.evaluate(()=>loadIndexedManufacturingHistory())).some(r=>r.cloudRecordId===reconnectId&&Number(r.packageCount)===11));
@@ -276,69 +322,6 @@ const base={id:'old-record',lot:'20261008-JI-ARABIKI-01',recipeName:'あらび�
  assert.ok(await c.page.evaluate(()=>localStorage.getItem('meatRecipeApp.manufacturingRecords.v1')));
  console.log('PASS synced-zero regression: ARABIKI/CHORIZO 0 → archive 25/31 on device A, mock Supabase, device B; herb 0/161 and genuine zero protected; no sync errors');
 
- // Single-click raw diagnostics: v1-only, allocation-only, and herb cases.
- const e=await device();const f=await device();
- async function seedDiagnosticFixtures(page, fixtureSpecs){
-   const bundles=await page.evaluate(({base,specs})=>specs.map(s=>MeatProductionSyncAdapter.fromLegacy({...base,...s,updatedAt:'2026-10-13T00:00:00Z'},MEAT_SUPABASE_CONFIG,MeatProductionSync)),{base,specs:fixtureSpecs});
-   for(const bundle of bundles){
-     const row={...bundle.record};delete row.legacy_payload;cloud.set(row.id,row);
-     for(const [key,a]of allocations){if(a.manufacturing_record_id!==row.id)continue;const incoming=bundle.allocations.find(b=>b.allocation_type===a.allocation_type);allocations.set(key,incoming?{...incoming,id:key}:{...a,quantity:0,calculated_weight_g:0});}
-     for(const incoming of bundle.allocations)if(![...allocations.values()].some(a=>a.manufacturing_record_id===row.id&&a.allocation_type===incoming.allocation_type))allocations.set(incoming.id,incoming);
-   }
- }
- const diagnosticSpecs=specs.slice(0,3).map(s=>({...s,packageCount:s.recipeName==='ハーブ'?'':0}));
- await seedDiagnosticFixtures(e.page,diagnosticSpecs);
- // Only an allocation stores ARABIKI=25; all record snapshots remain zero.
- let araAllocation=[...allocations.values()].find(a=>a.manufacturing_record_id===oldId&&a.allocation_type==='STANDARD');
- if(!araAllocation){araAllocation={id:id(),manufacturing_record_id:oldId,business_id:'business',allocation_type:'STANDARD',quantity_unit:'package',unit_weight_g:180};}
- allocations.set(araAllocation.id,{...araAllocation,quantity:25,calculated_weight_g:4500});
- await e.page.evaluate(({base,specs})=>{
-   localStorage.setItem('meatRecipeApp.manufacturingRecords.v1',JSON.stringify([{...base,id:'v1-only-chorizo',recipeName:'チョリソー',lot:'20261008-JI-CHORIZO-01',packageCount:31}]));
-   localStorage.setItem('manufacturingRecords',JSON.stringify(specs.map(s=>({...base,...s}))));
-   Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{window.copiedDiagnostic=text;}}});
-   window.diagnosticDeletes=[];
-   const nativeDelete=IDBObjectStore.prototype.delete;
-   IDBObjectStore.prototype.delete=function(key){window.diagnosticDeletes.push({store:this.name,key});return nativeDelete.call(this,key);};
-   renderManufacturingRecordHistory([]);
- },{base,specs:diagnosticSpecs});
- const oldArchive=await e.page.evaluate(()=>localStorage.getItem('meatRecipeApp.manufacturingRecords.v1'));
- const logStart=requestLog.length;
- await e.page.locator('#pastManufacturingDiagnostics').click();await e.page.locator('#pastDiagnosticText').waitFor();
- const diagnosticText=await e.page.locator('#pastDiagnosticText').inputValue();assert.deepEqual(await e.page.evaluate(()=>window.diagnosticDeletes),[]);
- assert.match(diagnosticText,/packageCount: 31/);assert.match(diagnosticText,/packageCount: 0/);assert.match(diagnosticText,/復旧済み/);assert.match(diagnosticText,/localStorage meatRecipeApp.manufacturingRecords.v1/);
- for(const lot of ['20261008-JI-ARABIKI-01','20261008-JI-CHORIZO-01','20261008-JI-HERB-01'])assert.ok(diagnosticText.includes(lot));
- await e.page.locator('#pastDiagnosticCopy').click();assert.equal(await e.page.evaluate(()=>window.copiedDiagnostic),diagnosticText);
- assert.equal(await e.page.evaluate(()=>localStorage.getItem('meatRecipeApp.manufacturingRecords.v1')),oldArchive);
- assert.ok(requestLog.slice(logStart).filter(r=>r.method!=='GET').every(r=>r.method==='POST'&&r.table!=='save_manufacturing_record'));
- await f.page.evaluate(()=>MeatProductionSync.pullHistoryFromCloud());const diagnosedRemote=await f.page.evaluate(async()=>combinedManufacturingHistory(await loadIndexedManufacturingHistory()));
- assert.equal(Number(diagnosedRemote.find(r=>r.cloudRecordId===migrationId).packageCount),31);assert.equal(Number(diagnosedRemote.find(r=>r.cloudRecordId===oldId).packageCount),25);
- const diagHerb=diagnosedRemote.find(r=>r.cloudRecordId===herbId);assert.equal(Number(diagHerb.herbStandardPackageCount),0);assert.equal(Number(diagHerb.herbEventPieceCount),161);
- console.log('PASS diagnostic TEST 1/2/5: one button snapshots sources, restores v1-only 31 and allocation-only 25 with POST upserts only, preserves herb 0/161 and v1, copies full report, second-device verification');
- // No explicit quantities: expose inverse as candidate, never POST that record.
- const g=await device();await seedDiagnosticFixtures(g.page,diagnosticSpecs);
- await g.page.evaluate(({base,oldId})=>{
-   localStorage.setItem('meatRecipeApp.manufacturingRecords.v1',JSON.stringify([{...base,id:'null-ara',packageCount:null}]));
-   localStorage.setItem('manufacturingRecords',JSON.stringify([{...base,id:oldId,cloudRecordId:oldId,packageCount:''}]));
- },{base,oldId});
- const noDataLog=requestLog.length;const noData=await g.page.evaluate(()=>runPastManufacturingDiagnostics());const missing=noData.reports.find(r=>r.lot==='20261008-JI-ARABIKI-01');
- assert.equal(missing.decision,'元製造数データなし');assert.equal(missing.inference.count,25);assert.equal(missing.canRecover,false);assert.match(noData.text,/packageCount: null/);assert.match(noData.text,/packageCount: ""/);assert.match(noData.text,/packageCount: 0/);
- assert.ok(!requestLog.slice(noDataLog).some(r=>r.method==='POST'&&(r.table==='manufacturing_records'&&r.body.id===oldId||r.table==='manufacturing_allocations'&&r.body.some(a=>a.manufacturing_record_id===oldId))));
- console.log('PASS diagnostic TEST 3/4: all-zero/null/empty → source data absent; inverse 25 is candidate only, no writes for this LOT');
- const backgroundLog=requestLog.length;await g.page.evaluate(()=>refreshManufacturingHistory());
- assert.ok(!requestLog.slice(backgroundLog).some(r=>r.method==='POST'&&(r.table==='manufacturing_records'&&r.body.id===oldId||r.table==='manufacturing_allocations'&&r.body.some(a=>a.manufacturing_record_id===oldId))));
- console.log('PASS diagnostic inverse candidate remains unconfirmed after ordinary background history refresh');
-
- // Distinct positive counts in old and current storage: show conflict, no overwrite.
- const h=await device();await h.page.evaluate(base=>{
-   localStorage.setItem('meatRecipeApp.manufacturingRecords.v1',JSON.stringify([{...base,lot:'20261008-JI-CHORIZO-01',recipeName:'チョリソー',packageCount:31}]));
-   localStorage.setItem('manufacturingRecords',JSON.stringify([{...base,lot:'20261008-JI-CHORIZO-01',recipeName:'チョリソー',packageCount:35}]));
- },base);
- const conflictLog=requestLog.length;const diagnosisConflict=await h.page.evaluate(()=>runPastManufacturingDiagnostics());const conflicting=diagnosisConflict.reports.find(r=>r.lot==='20261008-JI-CHORIZO-01');assert.match(conflicting.decision,/競合/);assert.equal(conflicting.canRecover,false);
- assert.ok(!requestLog.slice(conflictLog).some(r=>r.method==='POST'&&(r.table==='manufacturing_records'&&r.body.id===migrationId||r.table==='manufacturing_allocations'&&r.body.some(a=>a.manufacturing_record_id===migrationId))));
- console.log('PASS diagnostic TEST 6: conflicting positives → conflict report, no writes for this LOT');
- await g.page.route('https://supabase.test/rest/v1/manufacturing_records**',r=>json(r,{message:'offline fixture'},503));
- const incomplete=await g.page.evaluate(()=>runPastManufacturingDiagnostics());assert.ok(incomplete.reports.every(r=>r.decision.includes('診断未完了')&&!r.canRecover));
- console.log('PASS diagnostic cloud unavailable: incomplete report, never falsely claims data absent');
  assert.deepEqual(errors,[]);assert.deepEqual(unexpected,[]);console.log('PASS all integration assertions; no uncaught browser errors; no production requests');
  } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

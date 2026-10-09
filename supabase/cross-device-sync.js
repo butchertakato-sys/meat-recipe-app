@@ -323,32 +323,6 @@
     return checks.every(Boolean);
   }
 
-  function cloudLegacyMetaPayload(row) {
-    if (!row || !Array.isArray(row.manufacturing_allocations)) return {};
-    const meta = row.manufacturing_allocations.find((item) => item.allocation_type === "LEGACY_META" && item.notes);
-    if (!meta) return {};
-    try {
-      const parsed = JSON.parse(meta.notes);
-      return parsed && typeof parsed === "object" ? parsed : {};
-    } catch (_) {
-      return {};
-    }
-  }
-
-  function recoveryDataScore(record) {
-    if (!record) return 0;
-    const positive = (value) => Number(value || 0) > 0;
-    let score = 0;
-    if (positive(record.meatTotal)) score += 5;
-    if (positive(record.meat6mm) || positive(record.meat3mm)) score += 2;
-    if (positive(record.packageCount) || positive(record.completedCount)) score += 5;
-    if (positive(record.herbStandardPackageCount) || positive(record.herbEventPieceCount)) score += 4;
-    if (positive(record.smokedCount) || positive(record.unsmokedCount)) score += 4;
-    if (Array.isArray(record.recipeRows) && record.recipeRows.length) score += 5;
-    if (positive(record.totalWeight) || positive(record.recipeTotal)) score += 2;
-    return score;
-  }
-
   function shouldRepublishRecovery(record, cloudRow) {
     const remote = global.MeatHistoryRecovery.fromBundle({ record: cloudRow, allocations: cloudRow.manufacturing_allocations });
     const fields = ["meat6mm", "meat3mm", "meatTotal", "waterAmount", "emulsionWeight", "recipeRows", "recipeTotal", "totalWeight", "theoreticalFinishedWeight", "packageCount", "completedCount", "herbStandardPackageCount", "herbEventPieceCount", "smokedCount", "unsmokedCount", "lossCount", "leftoverWeight", "memo", "savedRecipeId"];

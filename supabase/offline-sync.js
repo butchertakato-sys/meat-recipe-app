@@ -66,7 +66,7 @@
     return dbPromise;
   }
 
-  async function putBundle(record, allocations, syncStatus = "pending", syncError = null, options = {}) {
+  async function putBundle(record, allocations, syncStatus = "pending", syncError = null) {
     const db = await openDatabase();
     const now = new Date().toISOString();
     const normalizedRecord = {
@@ -98,7 +98,7 @@
 
     const index = allocationStore.index("manufacturing_record_id");
     const existing = await requestPromise(index.getAll(normalizedRecord.id));
-    if (!options.preserveAllocations) existing.forEach((item) => allocationStore.delete(item.id));
+    existing.forEach((item) => allocationStore.delete(item.id));
     normalizedAllocations.forEach((item) => allocationStore.put(item));
     await transactionPromise(transaction);
     await emitPendingCount();
@@ -277,13 +277,12 @@
     return response;
   }
 
-  async function fetchCloudHistory(options = {}) {
+  async function fetchCloudHistory() {
     if (!cloudConfigured()) throw new Error("Supabase connection is not configured");
     const token = await accessToken();
     if (!token) throw new Error("Supabase authentication session is not available");
     const select = "*,product:products(display_name,internal_code),recipe:recipes(display_name,internal_code),manufacturing_allocations(*)";
     const params = new URLSearchParams({ select, order: "updated_at.asc" });
-    if (Array.isArray(options.lots) && options.lots.length) params.set("lot_number", `in.(${options.lots.map((lot) => JSON.stringify(String(lot))).join(",")})`);
     if (currentConfig.businessId) params.set("business_id", `eq.${currentConfig.businessId}`);
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000);
@@ -392,52 +391,11 @@
     }
   }
 
-  async function saveAndSync(record, allocations) {
+  async function saveAndSync(record, allocations, options = {}) {
     const local = await putBundle(record, allocations, "pending");
     const cloud = await syncBundle(local);
-    if (cloud.synced) setTimeout(() => pullHistoryFromCloud().catch(() => {}), 0);
+    if (cloud.synced && options.refreshHistory !== false) setTimeout(() => pullHistoryFromCloud().catch(() => {}), 0);
     return { localSaved: true, ...cloud, record: local.record, allocations: local.allocations };
-  }
-
-  async function upsertDiagnosticRecovery(record, allocations, cloudAllocations = []) {
-    // Diagnostic recovery is deliberately upsert-only. The normal RPC replaces
-    // allocation rows, so use authenticated REST without DELETE or stale-row PATCH.
-    const existing = await bundleForRecord(record);
-    const outgoing = allocations.map((a) => {
-      const cloud = cloudAllocations.find((r) => r.allocation_type === a.allocation_type);
-      const local = existing.allocations.find((r) => r.allocation_type === a.allocation_type);
-      return { ...a, id: (cloud || local || a).id };
-    });
-    const mirrors = existing.allocations.filter((a) => !outgoing.some((r) => r.id === a.id)).map((a) => {
-      const replacement = outgoing.find((r) => r.allocation_type === a.allocation_type);
-      return replacement ? { ...replacement, id: a.id } : a;
-    });
-    const missing = ["business_id", "product_id", "recipe_id", "recipe_version_id"].filter((k) => !record[k]);
-    for (const a of outgoing) if (Number(a.quantity) > 0 && a.allocation_type !== "LEGACY_META") {
-      if (!a.packaging_master_id || !a.packaging_version_id) missing.push(`${a.allocation_type}.packaging UUID`);
-    }
-    if (missing.length) throw new Error(`復旧用マスタID不足: ${missing.join(", ")}`);
-    await putBundle(record, [...outgoing, ...mirrors], "pending", null, { preserveAllocations: true });
-    try {
-      const payload = cloudRecord(record);
-      delete payload.legacy_payload;
-      await directRestRequest("manufacturing_records?on_conflict=id", {
-        method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(payload)
-      });
-      if (outgoing.length) await directRestRequest("manufacturing_allocations?on_conflict=id", {
-        method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(outgoing.map(cloudAllocation))
-      });
-      await setBundleSyncState(record.id, "synced");
-      return { synced: true, recordId: record.id };
-    } catch (error) {
-      await setBundleSyncState(record.id, "error", String(error.message || error));
-      return { synced: false, recordId: record.id, error };
-    }
-  }
-
-  async function waitForIdle() {
-    if (syncPromise) await syncPromise.catch(() => {});
-    if (historyPullPromise) await historyPullPromise.catch(() => {});
   }
 
   async function pendingRecords() {
@@ -536,8 +494,6 @@
     refreshHistoryCache,
     getMeta,
     pendingCount,
-    putBundle,
-    upsertDiagnosticRecovery,
-    waitForIdle
+    putBundle
   };
 })(window);
