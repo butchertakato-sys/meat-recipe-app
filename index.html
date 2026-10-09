@@ -628,6 +628,7 @@
   <script src="supabase/history-recovery.js"></script>
   <script src="supabase/app-sync-adapter.js"></script>
   <script src="manufacturing-analysis.js"></script>
+  <script src="supabase/record-observation.js"></script>
   <style>
     #manufacturingAnalysis [hidden] { display: none; }
     #manufacturingAnalysis table { border-collapse: collapse; font-size: 15px; text-align: left; }
@@ -1444,6 +1445,7 @@
       if (type === "saved-recipe-detail") showSavedRecipeDetail(id);
       if (type === "record-history") showManufacturingRecordHistory();
       if (type === "record-analysis") showManufacturingAnalysis();
+      if (type === "record-observation") MeatRecordObservation.show();
       if (type === "record-csv") showManufacturingRecordCsv();
       if (type === "record-detail") showManufacturingRecordDetail(id);
       if (type === "packaging-master") showPackagingMasterList();
@@ -1523,6 +1525,7 @@
         { label: "保存済みレシピ確認", description: "保存した計算結果を確認・編集", type: "saved-recipe-list", id: "saved-recipes" },
         { label: "製造記録履歴", description: "保存した記録を確認", type: "record-history", id: "history" },
         { label: "製造実績・分析", description: "製造記録一覧・商品別集計", type: "record-analysis", id: "analysis" },
+        { label: "重複・削除診断", description: "保存層の生データを読み取り", type: "record-observation", id: "observation" },
         { label: "CSV出力", description: "保存済み記録を書き出し", type: "record-csv", id: "csv" },
         { label: "包装マスタ", description: "包装基準の登録・編集", type: "packaging-master", id: "packaging" }
       ];
