@@ -1224,6 +1224,10 @@
       const recordForPending = (old) => canonical.find((r) => manufacturingRecordId(r) === old.record.id) || cachedBundleToManufacturingRecord(old);
       return pendingBundles.map((old) => {
         const lot = old.record.lot_number;
+        const sameId = cloud.find((r) => r.id === old.record.id);
+        if (sameId && sameId.lot_number && lot && sameId.lot_number !== lot) {
+          return { ...old, recoveryError: `同一IDのLOT不一致：${lot}（自動変更しません）` };
+        }
         const matches = cloud.filter((r) => r.lot_number === lot && r.status !== "deleted");
         const localIds = new Set(all.filter((b) => b.record.lot_number === lot && b.record.status !== "deleted").map((b) => b.record.id));
         const code = window.MeatProductionSyncAdapter.internalCode(recordForPending(old));
@@ -1237,7 +1241,7 @@
         const record = canonical.find((r) => manufacturingRecordId(r) === old.record.id);
         if (!record) return { ...old, recoveryError: "復旧元の製造記録が見つかりません" };
         // Retain the existing cache/cloud identity and LOT, including deleted records.
-        const rebuilt = window.MeatProductionSyncAdapter.fromLegacy({ ...record, cloudRecordId: old.record.id, lot, status: old.record.status }, window.MEAT_SUPABASE_CONFIG || {}, window.MeatProductionSync);
+        const rebuilt = window.MeatProductionSyncAdapter.fromLegacy({ ...record, cloudRecordId: old.record.id, lot, status: record.status === "deleted" ? "deleted" : old.record.status }, window.MEAT_SUPABASE_CONFIG || {}, window.MeatProductionSync);
         return rebuilt;
       });
     }
@@ -1245,12 +1249,12 @@
     async function loadIndexedManufacturingHistory() {
       await initializeManufacturingSync();
       const bundles = await window.MeatProductionSync.getLocalHistory();
+      const records = bundles.map(cachedBundleToManufacturingRecord);
       manufacturingIndexedHistory.clear();
-      bundles.forEach((bundle) => {
-        const record = cachedBundleToManufacturingRecord(bundle);
+      records.forEach((record) => {
         if (record.status !== "deleted") manufacturingIndexedHistory.set(manufacturingRecordId(record), record);
       });
-      return bundles.map(cachedBundleToManufacturingRecord);
+      return records;
     }
 
     function combinedManufacturingHistory(indexedRecords = []) {
@@ -2175,7 +2179,7 @@
     function loadSavedRecipeCalculations() {
       const parsed = readStorageArray(SAVED_RECIPE_CALCULATIONS_KEY, OLD_SAVED_RECIPE_CALCULATIONS_KEY);
       let changed = false;
-      const normalized = parsed.map((record, index) => {
+      const normalized = parsed.map((record) => {
         let item = record;
         if (!item.savedRecipeId && !item.id) {
           changed = true;
@@ -2278,8 +2282,11 @@
       const categoryCode = category === "自社レシピ" ? "JI" : "IT";
       const recipeCode = packagingKey === "herbProduct" ? "HERB-P" : packagingKey === "herbEvent" ? "HERB-E" : recipeCodeForRecipe(recipe);
       const base = `${datePart}-${categoryCode}-${recipeCode}`;
-      const count = loadManufacturingRecords().filter((record) => String(record.lot || "").startsWith(base)).length + 1;
-      return `${base}-${String(count).padStart(2, "0")}`;
+      const known = [...loadManufacturingRecords({ includeDeleted: true }), ...manufacturingIndexedHistory.values()];
+      const suffixes = known.map((record) => String(record.lot || "")).filter((lot) => lot.startsWith(`${base}-`))
+        .map((lot) => lot.slice(base.length + 1)).filter((suffix) => /^\d+$/.test(suffix)).map(Number);
+      const next = Math.max(0, ...suffixes) + 1;
+      return `${base}-${String(next).padStart(2, "0")}`;
     }
 
     function showSavedRecipeList(message = "") {
@@ -2473,7 +2480,7 @@
         showSavedRecipeList("削除しました");
       } catch (error) {
         const status = document.getElementById("savedRecipeStatus");
-        if (status) status.textContent = "削除できませんでした";
+        if (status) status.textContent = "削除に失敗しました";
       }
     }
 
@@ -2903,12 +2910,8 @@
 
     function loadManufacturingRecords(options = {}) {
       const parsed = readStorageArray(MANUFACTURING_RECORDS_KEY, OLD_MANUFACTURING_RECORDS_KEY);
-      const normalized = parsed.map((record, index) => {
-        let item = record;
-        if (!item.manufacturingRecordId && !item.id) {
-          const manufacturingRecordId = `manufacturing-record-${item.savedAt || item.createdAt || "legacy"}-${index}`;
-          item = { ...item, id: manufacturingRecordId, manufacturingRecordId };
-        }
+      const normalized = parsed.map((record) => {
+        const item = record;
         const packagingUnit = item.packagingUnit || (item.packageCountLabel === "完成本数" ? "本" : (item.packageCountLabel ? "袋" : ""));
         const packageCount = packagingUnit === "本" ? "" : (item.packageCount || "");
         const completedCount = packagingUnit === "本" ? (item.completedCount || item.packageCount || "") : (item.completedCount || "");
@@ -2968,15 +2971,17 @@
     }
 
     function saveManufacturingRecords(records) {
-      const byId = new Map(records.map((record) => [manufacturingRecordId(record), record]));
+      const unidentified = records.filter((record) => !manufacturingRecordId(record));
+      const byId = new Map(records.filter((record) => manufacturingRecordId(record)).map((record) => [manufacturingRecordId(record), record]));
       for (const deleted of readLegacyStorageArray(MANUFACTURING_RECORDS_KEY).filter((r) => r.status === "deleted")) {
-        byId.set(manufacturingRecordId(deleted), deleted);
+        if (manufacturingRecordId(deleted)) byId.set(manufacturingRecordId(deleted), deleted);
+        else if (!unidentified.some((record) => JSON.stringify(record) === JSON.stringify(deleted))) unidentified.push(deleted);
       }
-      localStorage.setItem(MANUFACTURING_RECORDS_KEY, JSON.stringify([...byId.values()]));
+      localStorage.setItem(MANUFACTURING_RECORDS_KEY, JSON.stringify([...byId.values(), ...unidentified]));
     }
 
     function manufacturingRecordId(record) {
-      return record.manufacturingRecordId || record.id;
+      return record.cloudRecordId || record.manufacturingRecordId || record.id;
     }
 
     function renderManufacturingRecordHistory(records, message = "", cacheNotice = "", diagnostics = null) {
@@ -3337,7 +3342,7 @@
         ...record,
         prepDate,
         date,
-        lot: generateLotFromExistingRecord(record, date),
+        lot: record.lot,
         packageCount: isCombinedHerb || record.packagingUnit === "本" ? "" : countValue,
         completedCount: isCombinedHerb ? "" : (record.packagingUnit === "本" ? String(count) : (record.completedCount || "")),
         herbStandardPackageCount,
@@ -3364,30 +3369,6 @@
         actualYieldPercent: yieldRate,
         updatedAt: new Date().toISOString()
       };
-    }
-
-    function generateLotFromExistingRecord(record, date) {
-      const code = record.recipeCode || recipeCodeFromRecord(record);
-      const datePart = (date || todayString()).replace(/-/g, "");
-      const categoryCode = record.category === "自社レシピ" ? "JI" : "IT";
-      const base = `${datePart}-${categoryCode}-${code}`;
-      if (String(record.lot || "").startsWith(`${base}-`)) return record.lot;
-      const count = loadManufacturingRecords().filter((item) => manufacturingRecordId(item) !== manufacturingRecordId(record) && String(item.lot || "").startsWith(base)).length + 1;
-      return `${base}-${String(count).padStart(2, "0")}`;
-    }
-
-    function recipeCodeFromRecord(record) {
-      if (record.recipeCode === "ADDITIVE-FREE-ARABIKI" || record.recipeKind === "fixed-own" || record.recipeName === "無添加あらびき") return "ADDITIVE-FREE-ARABIKI";
-      if (record.packagingKey === "arabiki" || record.recipeName === "あらびき") return "ARABIKI";
-      if (record.packagingKey === "cheese" || record.recipeName === "チーズ") return "CHEESE";
-      if (record.packagingKey === "herbProduct") return "HERB-P";
-      if (record.packagingKey === "herbEvent") return "HERB-E";
-      if (String(record.recipeName || "").includes("ハーブ")) return "HERB";
-      if (record.packagingKey === "chorizo" || record.recipeName === "チョリソー") return "CHORIZO";
-      if (String(record.recipeName || "").includes("山小屋")) return "YAMAGOYA";
-      if (String(record.recipeName || "").includes("ジビエ")) return "GIBIER";
-      if (String(record.recipeName || "").includes("峠")) return "TOUGE";
-      return "RECIPE";
     }
 
     async function deleteManufacturingRecord(recordId) {

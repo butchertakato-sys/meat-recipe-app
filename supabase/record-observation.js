@@ -4,8 +4,7 @@
   const LOTS = ["20260728-IT-GIBIER-01", "20260728-IT-GIBIER-02"];
   const DAY = "2026-07-28";
   const KEYS = ["manufacturingRecords", "meatRecipeApp.manufacturingRecords.v1", "savedRecipes",
-    "meatRecipeApp.savedRecipeCalculations.v1", "packagingMaster.v1", "meatRecipeApp.supabaseMasters.v1",
-    "meatRecipeApp.deviceId.v1", "meatRecipeApp.crossDeviceSyncStatus.v1"];
+    "meatRecipeApp.savedRecipeCalculations.v1"];
   const FIELDS = ["id", "manufacturingRecordId", "cloudRecordId", "savedRecipeId", "savedCalculationId",
     "lot", "lot_number", "prepDate", "prep_date", "date", "manufacturing_date", "createdAt", "created_at",
     "updatedAt", "updated_at", "savedAt", "status", "syncStatus", "sync_status", "syncError", "sync_error",
@@ -224,12 +223,12 @@
     try { indexedAfter = await readIndexed(); } catch (_) { indexedAfter = null; }
     const changedKeys = KEYS.filter(key => before[key].raw !== after[key].raw);
     const dbChanged = indexedAfter ? JSON.stringify(indexed) !== JSON.stringify(indexedAfter) : null;
-    return { format: "meat-record-observation-v1", baseline: "2c5fa57a9b6a90a05ded508e34c71e6f70e29406",
+    return { format: "meat-record-observation-v2",
       startedAt, finishedAt: new Date().toISOString(), targetLots: LOTS, targetDay: DAY,
       consistency: { changedLocalStorageKeys: changedKeys, indexedChangedDuringRead: dbChanged,
         note: "診断は書き込みません。既存のバックグラウンド同期は独立して動作するため、保存層を跨ぐ原子的snapshotではありません。" },
       ...build(before, indexed, cloud),
-      ...(changedKeys.length || dbChanged ? { changedDuringRead: { localStorageAfter: after, indexedAfter } } : {}) };
+      ...(changedKeys.length || dbChanged ? { changedDuringRead: build(after, indexedAfter || { state: "error", records: [], allocations: [], meta: [] }, { state: "not-reread", tables: {} }) } : {}) };
   }
   async function show() {
     if (document.getElementById("recordObservation")) return;
@@ -251,7 +250,7 @@
       const report = await collect();
       output.value = JSON.stringify(report, null, 2);
       const incomplete = report.indexedDB.state === "error" || report.supabase.state !== "observed" ||
-        Object.entries(report.supabase.tables).some(([key, result]) => key !== "manufacturing_lot_reservations" && result.state !== "read");
+        Object.values(report.supabase.tables).some(result => result.state !== "read");
       status.textContent = incomplete ? "取得できない保存層があります。取得状況も含めて結果をコピーしてください。" : "診断結果を取得しました。結果をコピーしてください。";
       button.disabled = false;
       button.addEventListener("click", async () => {

@@ -4,7 +4,6 @@ const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
-const baseline=false;
 const root = path.resolve(__dirname, '..');
 const id = () => crypto.randomUUID();
 const codes = ['ARABIKI','CHEESE','HERB','CHORIZO','ADDITIVE_FREE_ARABIKI','YAMAGOYA','GIBIER_CENTER','TOUGE','ZANZATEI'];
@@ -69,14 +68,14 @@ const base={id:'old-record',lot:'20261008-JI-ARABIKI-01',recipeName:'あらび�
  await perf.page.waitForFunction(()=>MeatCrossDeviceSync.getStatus().state==='synced' && !crossDeviceIntegrationPromise);
  measurements.startup=countRequests(requestLog.slice(mark));
  const trace=await perf.page.evaluate(()=>syncTrace);
- if(!baseline)assert.equal(trace[0],'crossBegin','startup must not launch standalone syncPending');
+ assert.equal(trace[0],'crossBegin','startup must not launch standalone syncPending');
  mark=requestLog.length;await perf.page.evaluate(()=>showManufacturingRecordTop());
  await perf.page.waitForFunction(()=>document.getElementById('manufacturingSyncStatus').textContent!=='未同期：確認中' && !crossDeviceIntegrationPromise);
  measurements.top=countRequests(requestLog.slice(mark));
- if(!baseline)assert.deepEqual(measurements.top,{recordsGET:0,recordsPOST:0,allocationsPOST:0,RPC:0});
+ assert.deepEqual(measurements.top,{recordsGET:0,recordsPOST:0,allocationsPOST:0,RPC:0});
  mark=requestLog.length;await perf.page.evaluate(()=>refreshManufacturingHistory(true));
  measurements.refresh=countRequests(requestLog.slice(mark));
- if(!baseline)assert.equal(measurements.refresh.recordsGET,2,'one migration comparison GET and one cache pull GET');
+ assert.equal(measurements.refresh.recordsGET,2,'one migration comparison GET and one cache pull GET');
  mark=requestLog.length;await perf.page.locator('#manufacturingSyncRetry').count().then(async()=>{
    await perf.page.evaluate(()=>showManufacturingRecordTop());
    await perf.page.waitForFunction(()=>!crossDeviceIntegrationPromise);
@@ -86,7 +85,7 @@ const base={id:'old-record',lot:'20261008-JI-ARABIKI-01',recipeName:'あらび�
    await perf.page.waitForFunction(()=>syncTrace.includes('crossEnd')&&!crossDeviceIntegrationPromise);
  });
  measurements.retry=countRequests(requestLog.slice(mark));
- if(!baseline){const retryTrace=await perf.page.evaluate(()=>syncTrace);assert.equal(retryTrace[0],'crossBegin');assert.equal(retryTrace.filter(t=>t==='crossBegin').length,1);}
+ {const retryTrace=await perf.page.evaluate(()=>syncTrace);assert.equal(retryTrace[0],'crossBegin');assert.equal(retryTrace.filter(t=>t==='crossBegin').length,1);}
  // Include successful new save and offline-to-online delivery in the same benchmark.
  async function benchmarkSave(offline){
    await perf.page.evaluate(()=>{window.savePullPromise=null;});
@@ -110,7 +109,7 @@ const base={id:'old-record',lot:'20261008-JI-ARABIKI-01',recipeName:'あらび�
  }
  measurements.newSave=await benchmarkSave(false);
  measurements.offlineOnline=await benchmarkSave(true);
- if(!baseline){assert.equal(measurements.newSave.recordsGET,1);assert.equal(measurements.offlineOnline.recordsGET,2);}
+ {assert.equal(measurements.newSave.recordsGET,1);assert.equal(measurements.offlineOnline.recordsGET,2);}
  // Migration uploads already have an orchestrated final cache pull.
  const migrationPerf=await device();
  await migrationPerf.page.evaluate(base=>localStorage.setItem('manufacturingRecords',JSON.stringify([{...base,id:MeatProductionSync.uuid(),lot:'20261009-JI-ARABIKI-MIGRATION',recipeCode:'ARABIKI'}])),base);
@@ -118,10 +117,10 @@ const base={id:'old-record',lot:'20261008-JI-ARABIKI-01',recipeName:'あらび�
  await migrationPerf.page.evaluate(async()=>{window.pullCalls=0;await runCrossDeviceIntegration();if(window.savePullPromise)await window.savePullPromise;});
  measurements.migrationSync=countRequests(requestLog.slice(migrationMark));
  const migrationPullCalls=await migrationPerf.page.evaluate(()=>window.pullCalls);
- if(!baseline)assert.equal(migrationPullCalls,1);
- console.log('MIGRATION CACHE PULL CALLS '+(baseline?'BEFORE':'AFTER')+' '+migrationPullCalls);
+ assert.equal(migrationPullCalls,1);
+ console.log('MIGRATION CACHE PULL CALLS '+'CURRENT'+' '+migrationPullCalls);
  await migrationPerf.context.close();
- if(!baseline){
+ {
    const partialPerf=await device();
    await partialPerf.page.route('https://supabase.test/rest/v1/saved_recipe_calculations**',r=>json(r,{message:'schema unavailable fixture'},404));
    await partialPerf.page.evaluate(base=>localStorage.setItem('manufacturingRecords',JSON.stringify([{...base,id:MeatProductionSync.uuid(),lot:'20261009-JI-ARABIKI-PARTIAL',recipeCode:'ARABIKI'}])),base);
@@ -131,10 +130,9 @@ const base={id:'old-record',lot:'20261008-JI-ARABIKI-01',recipeName:'あらび�
    console.log('PASS partial integration retains cache refresh after successful migration upload');
  }
 
- console.log('REQUEST COUNTS '+(baseline?'BEFORE':'AFTER')+' '+JSON.stringify(measurements));
+ console.log('REQUEST COUNTS '+'CURRENT'+' '+JSON.stringify(measurements));
  console.log('SYNC TRACE startup '+JSON.stringify(trace));
  await perf.context.close();
- if(baseline)return;
  cloud.clear();allocations.clear();
  // Online event still flushes an offline-first bundle; another device can explicitly pull it.
  const reconnect=await device();

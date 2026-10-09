@@ -303,26 +303,6 @@
     return Number.isFinite(parsed) ? parsed : 0;
   }
 
-  function sameNumber(a, b, tolerance = 0.01) {
-    return Math.abs(n(a) - n(b)) <= tolerance;
-  }
-
-  function manufacturingEquivalent(local, cloud) {
-    const legacy = cloud && cloud.legacy_payload && typeof cloud.legacy_payload === "object" ? cloud.legacy_payload : {};
-    const checks = [
-      String(local.prepDate || "") === String(cloud.prep_date || legacy.prepDate || ""),
-      String(local.date || "") === String(cloud.manufacturing_date || legacy.date || ""),
-      String(local.lot || "") === String(cloud.lot_number || legacy.lot || ""),
-      sameNumber(local.theoreticalFinishedWeight || local.totalWeight, cloud.theoretical_weight_g != null ? cloud.theoretical_weight_g : (legacy.theoreticalFinishedWeight || legacy.totalWeight)),
-      sameNumber(local.actualFinishedWeightG != null ? local.actualFinishedWeightG : local.finishedWeight, cloud.completed_weight_g != null ? cloud.completed_weight_g : (legacy.actualFinishedWeightG != null ? legacy.actualFinishedWeightG : legacy.finishedWeight)),
-      sameNumber(local.leftoverWeight, cloud.remainder_weight_g != null ? cloud.remainder_weight_g : legacy.leftoverWeight)
-    ];
-    const localRecipe = String(local.recipeName || local.product || local.savedRecipeName || "");
-    const cloudRecipe = String((cloud.recipe && cloud.recipe.display_name) || legacy.recipeName || legacy.product || legacy.savedRecipeName || "");
-    if (localRecipe && cloudRecipe) checks.push(localRecipe === cloudRecipe);
-    return checks.every(Boolean);
-  }
-
   function shouldRepublishRecovery(record, cloudRow) {
     const remote = global.MeatHistoryRecovery.fromBundle({ record: cloudRow, allocations: cloudRow.manufacturing_allocations });
     const fields = ["meat6mm", "meat3mm", "meatTotal", "waterAmount", "emulsionWeight", "recipeRows", "recipeTotal", "totalWeight", "theoreticalFinishedWeight", "packageCount", "completedCount", "herbStandardPackageCount", "herbEventPieceCount", "smokedCount", "unsmokedCount", "lossCount", "leftoverWeight", "memo", "savedRecipeId"];
@@ -332,17 +312,6 @@
       if (typeof value === "number" || (key.endsWith("Count") && !Number.isNaN(Number(value)))) return Number(value) !== Number(remote[key]);
       return JSON.stringify(value) !== JSON.stringify(remote[key]);
     });
-  }
-
-  function cloudLotMap(rows) {
-    const map = new Map();
-    for (const row of rows || []) {
-      const lot = String(row.lot_number || "").trim();
-      if (!lot || row.status === "deleted") continue;
-      if (!map.has(lot)) map.set(lot, []);
-      map.get(lot).push(row);
-    }
-    return map;
   }
 
   async function migrateManufacturingRecords(options) {
@@ -356,155 +325,43 @@
     const loaded = await loadLocal();
     const local = (Array.isArray(loaded) ? loaded : []).map((row) => ({ ...row }));
     const cloud = await fetchCloudManufacturingRecords();
-    const byLot = cloudLotMap(cloud);
     const conflicts = [];
     let uploaded = 0;
-    let merged = 0;
-
-    for (let index = 0; index < local.length; index += 1) {
+    for (let index = 0; index < local.length; index++) {
       const original = local[index];
-      const existingId = original.cloudRecordId || original.manufacturingRecordId || original.id;
-      const sameId = cloud.find((row) => row.id === existingId);
-      // Never recover/re-publish an active archive over a deletion. Pending
-      // tombstones are delivered by syncPending using their original bundle.
-      if (original.status === "deleted" || (sameId && sameId.status === "deleted")) {
+      const id = original.cloudRecordId || original.manufacturingRecordId || original.id;
+      const remote = cloud.find((row) => row.id === id);
+      if (remote && original.lot && remote.lot_number && original.lot !== remote.lot_number) {
+        conflicts.push({ type: "LOT_CONFLICT", lot: original.lot, cloudRecordIds: [id] });
+        continue;
+      }
+      if (original.status === "deleted" || (remote && remote.status === "deleted")) {
         local[index] = { ...original, status: "deleted" };
         continue;
       }
-      if (sameId) {
-        const record = options.recoverRecord ? options.recoverRecord(original, [sameId]) : original;
-        local[index] = record;
-        if (record.syncStatus === "error" || record.syncStatus === "pending") continue;
-        if (shouldRepublishRecovery(record, sameId)) {
-          const result = await uploadLocal(record, { migration: true, preserveLot: true, recovery: true });
-          record.syncStatus = result && result.synced ? "synced" : "error";
-          record.syncError = result && result.error ? String(result.error.message || result.error) : "";
-          if (result && result.synced) uploaded++;
-        }
-        continue;
-      }
-      if (original.recoveryConflict && original.recoveryConflict.length > 1) {
-        conflicts.push({ type: "LOT_CONFLICT", lot: original.lot, cloudRecordIds: original.recoveryConflict });
-        continue;
-      }
-      const originalMatches = byLot.get(String(original.lot || "").trim()) || [];
-      if (original.cloudRecordId && originalMatches.some((r) => r.id !== original.cloudRecordId)) {
-        conflicts.push({ type: "LOT_CONFLICT", lot: original.lot, cloudRecordIds: originalMatches.map((r) => r.id) });
-        continue;
-      }
-      const localCode = global.MeatProductionSyncAdapter.internalCode(original);
-      const incompatible = originalMatches.some((row) => {
-        const code = global.MeatProductionSyncAdapter.internalCode(global.MeatHistoryRecovery.fromBundle({ record: row, allocations: row.manufacturing_allocations }));
-        return localCode !== "UNKNOWN" && code !== "UNKNOWN" && localCode !== code;
-      });
-      if (incompatible) {
-        conflicts.push({ type: "LOT_CONFLICT", lot: original.lot, cloudRecordIds: originalMatches.map((r) => r.id) });
-        continue;
-      }
-      const record = options.recoverRecord ? options.recoverRecord(original, cloud) : original;
+      const record = options.recoverRecord ? options.recoverRecord(original, remote ? [remote] : []) : original;
       local[index] = record;
+      // Pending IndexedDB bundles are sent once by the subsequent syncPending.
+      if (record.syncStatus === "error" || record.syncStatus === "pending") continue;
       const lot = String(record.lot || "").trim();
-      if (!lot) {
-        conflicts.push({ type: "LOT_MISSING", lot: "", recipeName: record.recipeName || record.product || "", date: record.date || record.prepDate || "" });
+      if (!lot || !/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(String(id || ""))) {
+        conflicts.push({ type: lot ? "IDENTITY_UNRESOLVED" : "LOT_MISSING", lot, cloudRecordIds: [] });
         continue;
       }
-
-      const lotMatches = byLot.get(lot) || [];
-      if (lotMatches.length > 1 || (record.cloudRecordId && lotMatches.some((r) => r.id !== record.cloudRecordId))) {
-        conflicts.push({ type: "LOT_CONFLICT", lot, cloudRecordIds: lotMatches.map((r) => r.id) });
+      const other = cloud.filter((row) => row.lot_number === lot && row.id !== id);
+      if (!remote && other.length) {
+        conflicts.push({ type: "LOT_CONFLICT", lot, cloudRecordIds: other.map(row => row.id) });
         continue;
       }
-      if (record.cloudRecordId) {
-        const linkedCloud = cloud.find((row) => row.id === record.cloudRecordId);
-        if (linkedCloud) {
-          if (record.syncStatus === "error" || record.syncStatus === "pending" || shouldRepublishRecovery(record, linkedCloud)) {
-            const recoveryResult = await uploadLocal(record, { migration: true, preserveLot: true, recovery: true });
-            if (recoveryResult && recoveryResult.synced) {
-              record.syncStatus = "synced";
-              record.syncError = "";
-              uploaded += 1;
-            }
-            else {
-              local[index] = {
-                ...record,
-                syncStatus: "error",
-                syncError: recoveryResult && recoveryResult.error ? String(recoveryResult.error.message || recoveryResult.error) : "過去履歴の復旧同期に失敗しました"
-              };
-            }
-          }
-          continue;
-        }
-      }
-
-      const matches = cloud.filter((row) => row.lot_number === lot);
-      if (matches.some((row) => row.status === "deleted")) {
-        conflicts.push({ type: "IDENTITY_UNRESOLVED", lot, cloudRecordIds: matches.map((row) => row.id) });
-        continue;
-      }
-      if (matches.length) {
-        const equivalent = matches.find((row) => row.id === existingId && manufacturingEquivalent(record, row));
-        if (equivalent) {
-          const linkedRecord = {
-            ...record,
-            id: equivalent.id,
-            manufacturingRecordId: equivalent.id,
-            cloudRecordId: equivalent.id,
-            syncStatus: "synced",
-            syncError: ""
-          };
-          if (shouldRepublishRecovery(linkedRecord, equivalent)) {
-            const recoveryResult = await uploadLocal(linkedRecord, { migration: true, preserveLot: true, recovery: true });
-            if (recoveryResult && recoveryResult.synced) uploaded += 1;
-            else {
-              linkedRecord.syncStatus = "error";
-              linkedRecord.syncError = recoveryResult && recoveryResult.error
-                ? String(recoveryResult.error.message || recoveryResult.error)
-                : "過去履歴の復旧同期に失敗しました";
-            }
-          }
-          local[index] = linkedRecord;
-          merged += 1;
-          continue;
-        }
-        conflicts.push({
-          type: "LOT_CONFLICT",
-          lot,
-          recipeName: record.recipeName || record.product || "",
-          date: record.date || record.prepDate || "",
-          cloudRecordIds: matches.map((row) => row.id)
-        });
-        continue;
-      }
-
-      if (!/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(String(existingId || ""))) {
-        conflicts.push({ type: "IDENTITY_UNRESOLVED", lot, cloudRecordIds: [] });
-        continue;
-      }
-      const result = await uploadLocal(record, { migration: true, preserveLot: true });
-      if (result && result.synced) {
-        uploaded += 1;
-        const updatedCloud = await fetchCloudManufacturingRecords();
-        const current = updatedCloud.find((row) => row.id === existingId);
-        local[index] = {
-          ...record,
-          id: current ? current.id : (result.recordId || record.id),
-          manufacturingRecordId: current ? current.id : (result.recordId || record.manufacturingRecordId),
-          cloudRecordId: current ? current.id : (result.recordId || record.cloudRecordId),
-          syncStatus: "synced",
-          syncError: ""
-        };
-        if (current) byLot.set(lot, [current]);
-      } else {
-        local[index] = {
-          ...record,
-          syncStatus: "error",
-          syncError: result && result.error ? String(result.error.message || result.error) : "クラウド同期に失敗しました"
-        };
-      }
+      if (remote && !shouldRepublishRecovery(record, remote)) continue;
+      const result = await uploadLocal(record, { migration: true, preserveLot: true, recovery: Boolean(remote) });
+      record.syncStatus = result && result.synced ? "synced" : "error";
+      record.syncError = result && result.error ? String(result.error.message || result.error) : "";
+      if (result && result.synced) uploaded++;
     }
 
     saveLocal(local);
-    return { total: local.length, uploaded, merged, conflicts, errors: local.filter((r) => r.syncStatus === "error").length, cloudCount: cloud.length };
+    return { total: local.length, uploaded, merged: 0, conflicts, errors: local.filter((r) => r.syncStatus === "error").length, cloudCount: cloud.length };
   }
 
   async function syncAll(options = {}) {

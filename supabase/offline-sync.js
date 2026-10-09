@@ -94,6 +94,12 @@
     const transaction = db.transaction([RECORD_STORE, ALLOCATION_STORE], "readwrite");
     const recordStore = transaction.objectStore(RECORD_STORE);
     const allocationStore = transaction.objectStore(ALLOCATION_STORE);
+    const previous = await requestPromise(recordStore.get(normalizedRecord.id));
+    if (previous && previous.status === "deleted" && normalizedRecord.status !== "deleted") {
+      transaction.abort();
+      await transactionPromise(transaction).catch(() => {});
+      throw new Error("削除済みの製造記録は再保存できません。");
+    }
     recordStore.put(normalizedRecord);
 
     const index = allocationStore.index("manufacturing_record_id");
@@ -307,22 +313,20 @@
 
   async function cacheCloudHistory(cloudRows) {
     const db = await openDatabase();
-    const existingRecords = await requestPromise(db.transaction(RECORD_STORE, "readonly").objectStore(RECORD_STORE).getAll());
-    const existingById = new Map(existingRecords.map((record) => [record.id, record]));
     const now = new Date().toISOString();
-    const accepted = [];
+    let updatedCount = 0;
+    const transaction = db.transaction([RECORD_STORE, ALLOCATION_STORE], "readwrite");
+    const recordStore = transaction.objectStore(RECORD_STORE);
+    const allocationStore = transaction.objectStore(ALLOCATION_STORE);
     for (const row of cloudRows || []) {
-      const existing = existingById.get(row.id);
+      // Check inside the write transaction, so a deletion committed while the
+      // GET was in flight is never replaced by its stale active response.
+      const existing = await requestPromise(recordStore.get(row.id));
       if (existing && existing.status === "deleted" && row.status !== "deleted") continue;
       if (existing && RETRYABLE.has(existing.sync_status)) continue;
       if (existing && existing.sync_status === "syncing") continue;
       if (existing && Date.parse(existing.updated_at || 0) > Date.parse(row.updated_at || 0)) continue;
-      accepted.push(row);
-    }
-    const transaction = db.transaction([RECORD_STORE, ALLOCATION_STORE], "readwrite");
-    const recordStore = transaction.objectStore(RECORD_STORE);
-    const allocationStore = transaction.objectStore(ALLOCATION_STORE);
-    for (const row of accepted) {
+      updatedCount++;
       const allocations = Array.isArray(row.manufacturing_allocations) ? row.manufacturing_allocations : [];
       const record = { ...row };
       delete record.manufacturing_allocations;
@@ -337,7 +341,7 @@
       }));
     }
     await transactionPromise(transaction);
-    return accepted.length;
+    return updatedCount;
   }
 
   async function pullHistoryFromCloud() {

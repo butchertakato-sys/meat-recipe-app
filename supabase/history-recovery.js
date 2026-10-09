@@ -57,6 +57,7 @@
       }
       if (a.allocation_type === "HERB_STANDARD") result.herbStandardUnitWeightG = a.unit_weight_g;
       if (a.allocation_type === "HERB_EVENT") result.herbEventUnitWeightG = a.unit_weight_g;
+      if ((a.allocation_type === "GIBIER_SMOKED" || a.allocation_type === "GIBIER_UNSMOKED") && !(Number(result.savedUnitWeightG) > 0) && Number(a.unit_weight_g) > 0) result.savedUnitWeightG = a.unit_weight_g;
       if (a.allocation_type === "TOUGE") Object.assign(result, { togeAllocationEnabled: true, togeAllocationId: a.allocation_code, togeAllocatedWeight: a.calculated_weight_g });
     }
     if (allocations.some((a) => a.allocation_type === "GIBIER_SMOKED" || a.allocation_type === "GIBIER_UNSMOKED")) result.completedCount = Number(result.smokedCount || 0) + Number(result.unsmokedCount || 0);
@@ -165,8 +166,6 @@
     }
     return groups.map((g) => {
       const record = inferCount(restoreSaved(canonical(g), savedRecipes));
-      const ids = new Set(g.map((s) => s.record.cloudRecordId || (["cloud", "indexed"].includes(s.source) ? s.record.id : null)).filter(Boolean));
-      if (ids.size > 1) record.recoveryConflict = [...ids];
       return record;
     });
   }
