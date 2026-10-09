@@ -322,6 +322,48 @@ const base={id:'old-record',lot:'20261008-JI-ARABIKI-01',recipeName:'あらび�
  assert.ok(await c.page.evaluate(()=>localStorage.getItem('meatRecipeApp.manufacturingRecords.v1')));
  console.log('PASS synced-zero regression: ARABIKI/CHORIZO 0 → archive 25/31 on device A, mock Supabase, device B; herb 0/161 and genuine zero protected; no sync errors');
 
+
+ // Analysis reads canonical local history only, with real IndexedDB and no cloud traffic.
+ const analysisMark=requestLog.length;
+ await c.page.evaluate(()=>{window.testOnline=false;});
+ const storageBefore=await c.page.evaluate(()=>JSON.stringify({...localStorage}));
+ await c.page.evaluate(()=>showManufacturingRecordTop());
+ await c.page.locator('[data-type="record-analysis"]').click();
+ await c.page.waitForSelector('#analysisResults table');
+ const expectedCount=await c.page.evaluate(async()=>canonicalManufacturingHistory((await MeatProductionSync.getLocalHistory()).map(cachedBundleToManufacturingRecord)).filter(r=>r.status!=='deleted').length);
+ assert.equal(await c.page.locator('[data-analysis-id]').count(),expectedCount);
+ await c.page.selectOption('#analysisProduct','PROD_HERB');
+ assert.equal(await c.page.locator('[data-analysis-id]').count(),await c.page.evaluate(async()=>canonicalManufacturingHistory((await MeatProductionSync.getLocalHistory()).map(cachedBundleToManufacturingRecord)).filter(r=>r.status!=='deleted' && MeatProductionSyncAdapter.internalCode(r)==='HERB').length));
+ assert.match(await c.page.locator('#analysisResults').innerText(),/イベント：161本/);
+ await c.page.selectOption('#analysisPeriod','custom');
+ await c.page.fill('#analysisStart','2099-01-01');await c.page.locator('#analysisStart').dispatchEvent('change');
+ assert.equal(await c.page.locator('[data-analysis-id]').count(),0);
+ await c.page.selectOption('#analysisPeriod','all');
+ await c.page.selectOption('#analysisProduct','');
+ await c.page.selectOption('#analysisCategory','委託製造');
+ assert.equal(await c.page.locator('[data-analysis-id]').count(),0);
+ await c.page.selectOption('#analysisCategory','');
+ await c.page.selectOption('#analysisOrder','oldest');
+ await c.page.setViewportSize({width:390,height:844});
+ assert.equal(await c.page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true,'phone table scroll stays inside page');
+ await c.page.setViewportSize({width:820,height:1180});
+ assert.equal(requestLog.length,analysisMark,'opening and filtering analysis makes no cloud requests');
+ // Existing detail is reached with the exact canonical identity.
+ const targetId=await c.page.locator('[data-analysis-id]').first().getAttribute('data-analysis-id');
+ await c.page.locator('[data-analysis-id]').first().click();
+ await c.page.waitForSelector('#recordDetailText');
+ assert.match(await c.page.locator('#recordDetailText').inputValue(),/製造記録/);
+ assert.equal(await c.page.evaluate(id=>manufacturingIndexedHistory.has(id),targetId),true);
+ // Analysis itself has not changed saved business data (navigation state is allowed by existing top menu).
+ const storageAfter=await c.page.evaluate(()=>JSON.stringify({...localStorage}));
+ const oldStorage=JSON.parse(storageBefore),newStorage=JSON.parse(storageAfter);
+ for(const key of Object.keys(oldStorage).filter(k=>/manufacturingRecords|savedRecipeCalculations/.test(k)))assert.equal(newStorage[key],oldStorage[key]);
+ // With localStorage absent, IndexedDB alone still renders the same canonical records offline.
+ await c.page.evaluate(()=>localStorage.clear());
+ await c.page.evaluate(()=>showManufacturingAnalysis());
+ assert.ok(await c.page.locator('[data-analysis-id]').count()>0);
+ assert.equal(requestLog.length,analysisMark);
+ console.log('PASS analysis: canonical deduplication, filters, herb quantities, iPhone overflow, existing detail, IndexedDB-only offline, unchanged business storage, zero cloud requests');
  assert.deepEqual(errors,[]);assert.deepEqual(unexpected,[]);console.log('PASS all integration assertions; no uncaught browser errors; no production requests');
  } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

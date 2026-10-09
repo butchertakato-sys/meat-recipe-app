@@ -627,6 +627,15 @@
   <script src="supabase/offline-sync.js"></script>
   <script src="supabase/history-recovery.js"></script>
   <script src="supabase/app-sync-adapter.js"></script>
+  <script src="manufacturing-analysis.js"></script>
+  <style>
+    #manufacturingAnalysis [hidden] { display: none; }
+    #manufacturingAnalysis table { border-collapse: collapse; font-size: 15px; text-align: left; }
+    #manufacturingAnalysis th, #manufacturingAnalysis td { padding: 12px; border-bottom: 1px solid #ddd; vertical-align: top; }
+    #manufacturingAnalysis th { background: #f3f5f3; white-space: nowrap; }
+    #manufacturingAnalysis tr[data-analysis-id]:hover { background: #f3f5f3; }
+    #manufacturingAnalysis tr[data-analysis-id]:focus { outline: 2px solid #527454; outline-offset: -2px; }
+  </style>
   <script src="supabase/cross-device-sync.js"></script>
   <script>
     /*
@@ -1434,6 +1443,7 @@
       if (type === "saved-recipe-list") showSavedRecipeList();
       if (type === "saved-recipe-detail") showSavedRecipeDetail(id);
       if (type === "record-history") showManufacturingRecordHistory();
+      if (type === "record-analysis") showManufacturingAnalysis();
       if (type === "record-csv") showManufacturingRecordCsv();
       if (type === "record-detail") showManufacturingRecordDetail(id);
       if (type === "packaging-master") showPackagingMasterList();
@@ -1512,6 +1522,7 @@
         { label: "製造数入力", description: "製造内容を入力して保存", type: "record-new", id: "new" },
         { label: "保存済みレシピ確認", description: "保存した計算結果を確認・編集", type: "saved-recipe-list", id: "saved-recipes" },
         { label: "製造記録履歴", description: "保存した記録を確認", type: "record-history", id: "history" },
+        { label: "製造実績・分析", description: "製造記録一覧・商品別集計", type: "record-analysis", id: "analysis" },
         { label: "CSV出力", description: "保存済み記録を書き出し", type: "record-csv", id: "csv" },
         { label: "包装マスタ", description: "包装基準の登録・編集", type: "packaging-master", id: "packaging" }
       ];
