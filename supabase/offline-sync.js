@@ -313,6 +313,7 @@
     const accepted = [];
     for (const row of cloudRows || []) {
       const existing = existingById.get(row.id);
+      if (existing && existing.status === "deleted" && row.status !== "deleted") continue;
       if (existing && RETRYABLE.has(existing.sync_status)) continue;
       if (existing && existing.sync_status === "syncing") continue;
       if (existing && Date.parse(existing.updated_at || 0) > Date.parse(row.updated_at || 0)) continue;

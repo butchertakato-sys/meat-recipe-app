@@ -222,7 +222,10 @@
   function fromLegacy(record, config, syncApi) {
     const code = internalCode(record);
     const now = new Date().toISOString();
-    const recordId = record.cloudRecordId || (String(record.id || "").match(/^[0-9a-f]{8}-[0-9a-f-]{27}$/i) ? record.id : syncApi.uuid());
+    const recordId = record.cloudRecordId || record.manufacturingRecordId || record.id;
+    if (!/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(String(recordId || ""))) {
+      throw new Error("既存の製造記録IDを確認できません（新しいIDは発行しません）。");
+    }
     const cloudRecord = {
       id: recordId,
       business_id: config.businessId || null,

@@ -363,6 +363,26 @@
 
     for (let index = 0; index < local.length; index += 1) {
       const original = local[index];
+      const existingId = original.cloudRecordId || original.manufacturingRecordId || original.id;
+      const sameId = cloud.find((row) => row.id === existingId);
+      // Never recover/re-publish an active archive over a deletion. Pending
+      // tombstones are delivered by syncPending using their original bundle.
+      if (original.status === "deleted" || (sameId && sameId.status === "deleted")) {
+        local[index] = { ...original, status: "deleted" };
+        continue;
+      }
+      if (sameId) {
+        const record = options.recoverRecord ? options.recoverRecord(original, [sameId]) : original;
+        local[index] = record;
+        if (record.syncStatus === "error" || record.syncStatus === "pending") continue;
+        if (shouldRepublishRecovery(record, sameId)) {
+          const result = await uploadLocal(record, { migration: true, preserveLot: true, recovery: true });
+          record.syncStatus = result && result.synced ? "synced" : "error";
+          record.syncError = result && result.error ? String(result.error.message || result.error) : "";
+          if (result && result.synced) uploaded++;
+        }
+        continue;
+      }
       if (original.recoveryConflict && original.recoveryConflict.length > 1) {
         conflicts.push({ type: "LOT_CONFLICT", lot: original.lot, cloudRecordIds: original.recoveryConflict });
         continue;
@@ -416,9 +436,13 @@
         }
       }
 
-      const matches = byLot.get(lot) || [];
+      const matches = cloud.filter((row) => row.lot_number === lot);
+      if (matches.some((row) => row.status === "deleted")) {
+        conflicts.push({ type: "IDENTITY_UNRESOLVED", lot, cloudRecordIds: matches.map((row) => row.id) });
+        continue;
+      }
       if (matches.length) {
-        const equivalent = matches.find((row) => manufacturingEquivalent(record, row));
+        const equivalent = matches.find((row) => row.id === existingId && manufacturingEquivalent(record, row));
         if (equivalent) {
           const linkedRecord = {
             ...record,
@@ -452,11 +476,15 @@
         continue;
       }
 
+      if (!/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(String(existingId || ""))) {
+        conflicts.push({ type: "IDENTITY_UNRESOLVED", lot, cloudRecordIds: [] });
+        continue;
+      }
       const result = await uploadLocal(record, { migration: true, preserveLot: true });
       if (result && result.synced) {
         uploaded += 1;
         const updatedCloud = await fetchCloudManufacturingRecords();
-        const current = updatedCloud.find((row) => row.lot_number === lot);
+        const current = updatedCloud.find((row) => row.id === existingId);
         local[index] = {
           ...record,
           id: current ? current.id : (result.recordId || record.id),

@@ -793,7 +793,10 @@
 
     backButton.addEventListener("click", () => currentBackHandler());
 
+    let manufacturingHistoryView = 0;
+
     function setHeader(title, subtitle, canGoBack, backHandler = showHome) {
+      manufacturingHistoryView++;
       screenTitle.textContent = title;
       screenSubtitle.textContent = subtitle || "";
       topbar.classList.toggle("has-back", Boolean(canGoBack));
@@ -924,7 +927,7 @@
       );
     }
 
-    function calculateGibierProductionMetrics(smokedValue, unsmokedValue, theoreticalValue, unitWeightValue = 70) {
+    function calculateGibierProductionMetrics(smokedValue, unsmokedValue, theoreticalValue, unitWeightValue = 65) {
       const smokedCount = Math.max(Math.trunc(Number(smokedValue) || 0), 0);
       const unsmokedCount = Math.max(Math.trunc(Number(unsmokedValue) || 0), 0);
       const completedCount = smokedCount + unsmokedCount;
@@ -968,7 +971,7 @@
     }
 
     function recordFormDraftValues() {
-      const ids = ["recordSavedRecipeId", "recordPrepDate", "recordDate", "recordCategory", "recordRecipe", "recordLot", "recordMemo", "recordPackageCount", "recordHerbStandardPackageCount", "recordHerbEventPieceCount", "recordSmokedCount", "recordUnsmokedCount", "recordLossCount", "recordLeftoverWeight", "recordTogeAllocationEnabled", "recordTogeAllocationId", "recordTogeGeneratedId", "recordTogePieceCount"];
+      const ids = ["recordIdentity", "recordCreatedAt", "recordReservedLot", "recordSaveComplete", "recordSavedRecipeId", "recordPrepDate", "recordDate", "recordCategory", "recordRecipe", "recordLot", "recordMemo", "recordPackageCount", "recordHerbStandardPackageCount", "recordHerbEventPieceCount", "recordSmokedCount", "recordUnsmokedCount", "recordLossCount", "recordLeftoverWeight", "recordTogeAllocationEnabled", "recordTogeAllocationId", "recordTogeGeneratedId", "recordTogePieceCount"];
       const values = {};
       ids.forEach((id) => {
         const element = document.getElementById(id);
@@ -1108,8 +1111,8 @@
     async function saveManufacturingRecordOfflineFirst(record, options = {}) {
       await initializeManufacturingSync();
 
-      let masterResult = await initializeSupabaseMasterData();
-      if (window.MeatProductionMasterData && typeof window.MeatProductionMasterData.refresh === "function") {
+      let masterResult = options.masterResult || await initializeSupabaseMasterData();
+      if (!options.masterResult && window.MeatProductionMasterData && typeof window.MeatProductionMasterData.refresh === "function") {
         const refreshed = await window.MeatProductionMasterData.refresh();
         if (refreshed && refreshed.data) {
           applySupabaseMasterData(refreshed.data);
@@ -1122,7 +1125,7 @@
         window.MEAT_SUPABASE_CONFIG || {},
         window.MeatProductionSync
       );
-      if (!options.migration && window.MeatCrossDeviceSync && bundle.record.lot_number) {
+      if (options.newRecord && !options.preserveLot && window.MeatCrossDeviceSync && bundle.record.lot_number) {
         const reservedLot = await window.MeatCrossDeviceSync.reserveManufacturingLot(bundle.record.id, bundle.record.lot_number);
         if (reservedLot && reservedLot !== bundle.record.lot_number) {
           bundle.record.lot_number = reservedLot;
@@ -1133,6 +1136,12 @@
         }
       }
 
+      if (options.onReserved) options.onReserved(record.lot);
+
+      // Reservation must also be reflected in the allocation metadata snapshot.
+      for (const allocation of bundle.allocations.filter((a) => a.allocation_type === "LEGACY_META")) {
+        allocation.notes = JSON.stringify({ ...JSON.parse(allocation.notes), lot: record.lot });
+      }
       Object.assign(record, bundle.legacyRecordPatch);
 
       const missingIds = [];
@@ -1212,7 +1221,7 @@
       const all = await window.MeatProductionSync.getLocalHistory();
       const cloud = await window.MeatProductionSync.fetchCloudHistory().catch(() => []);
       const canonical = canonicalManufacturingHistory(all.map(cachedBundleToManufacturingRecord), cloud);
-      const recordForPending = (old) => canonical.find((r) => r.cloudRecordId === old.record.id || (old.record.lot_number && r.lot === old.record.lot_number)) || cachedBundleToManufacturingRecord(old);
+      const recordForPending = (old) => canonical.find((r) => manufacturingRecordId(r) === old.record.id) || cachedBundleToManufacturingRecord(old);
       return pendingBundles.map((old) => {
         const lot = old.record.lot_number;
         const matches = cloud.filter((r) => r.lot_number === lot && r.status !== "deleted");
@@ -1222,10 +1231,10 @@
           const remoteCode = window.MeatProductionSyncAdapter.internalCode(window.MeatHistoryRecovery.fromBundle({ record: r, allocations: r.manufacturing_allocations }));
           return code !== "UNKNOWN" && remoteCode !== "UNKNOWN" && code !== remoteCode;
         });
-        if (recordForPending(old).recoveryConflict || matches.length > 1 || localIds.size > 1 || incompatible || (matches.length === 1 && matches[0].id !== old.record.id)) {
+        if (old.record.status !== "deleted" && !cloud.some((r) => r.id === old.record.id) && (matches.length > 1 || localIds.size > 1 || incompatible || (matches.length === 1 && matches[0].id !== old.record.id))) {
           return { ...old, recoveryError: `LOT競合：${lot}（自動変更しません）` };
         }
-        const record = canonical.find((r) => r.cloudRecordId === old.record.id || (lot && r.lot === lot));
+        const record = canonical.find((r) => manufacturingRecordId(r) === old.record.id);
         if (!record) return { ...old, recoveryError: "復旧元の製造記録が見つかりません" };
         // Retain the existing cache/cloud identity and LOT, including deleted records.
         const rebuilt = window.MeatProductionSyncAdapter.fromLegacy({ ...record, cloudRecordId: old.record.id, lot, status: old.record.status }, window.MEAT_SUPABASE_CONFIG || {}, window.MeatProductionSync);
@@ -1241,14 +1250,14 @@
         const record = cachedBundleToManufacturingRecord(bundle);
         if (record.status !== "deleted") manufacturingIndexedHistory.set(manufacturingRecordId(record), record);
       });
-      return Array.from(manufacturingIndexedHistory.values());
+      return bundles.map(cachedBundleToManufacturingRecord);
     }
 
     function combinedManufacturingHistory(indexedRecords = []) {
       const records = canonicalManufacturingHistory(indexedRecords).filter((record) => record.status !== "deleted");
       manufacturingIndexedHistory.clear();
       records.forEach((record) => manufacturingIndexedHistory.set(manufacturingRecordId(record), record));
-      return records.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+      return records.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || String(a.lot || "").localeCompare(String(b.lot || "")) || String(manufacturingRecordId(a) || "").localeCompare(String(manufacturingRecordId(b) || "")));
     }
 
     let crossDeviceIntegrationPromise = null;
@@ -1306,16 +1315,13 @@
           config: window.MEAT_SUPABASE_CONFIG || {},
           manufacturing: {
             loadLocal: async () => canonicalManufacturingHistory(await loadIndexedManufacturingHistory()),
-            recoverRecord: (record, cloudRows) => canonicalManufacturingHistory([record], cloudRows).find((r) => r.lot === record.lot) || record,
+            recoverRecord: (record, cloudRows) => canonicalManufacturingHistory([record], cloudRows).find((r) => manufacturingRecordId(r) === manufacturingRecordId(record)) || record,
             saveLocal: saveManufacturingRecords,
             uploadLocal: (record, options) => saveManufacturingRecordOfflineFirst(record, options)
           }
         });
-        if (result && result.state === "synced" && window.MeatProductionSync) {
+        if (window.MeatProductionSync) {
           result.historyRefresh = await window.MeatProductionSync.refreshHistoryCache().catch(() => null);
-        } else if (result && result.manufacturing && result.manufacturing.uploaded > 0 && window.MeatProductionSync) {
-          // Successful migration saves still refresh the cache when another item is deferred.
-          result.historyRefresh = await window.MeatProductionSync.pullHistoryFromCloud().catch(() => null);
         }
         const status = document.getElementById("crossDeviceSyncStatus");
         if (status) status.textContent = crossDeviceSyncStatusText();
@@ -1572,7 +1578,7 @@
         { packagingId: "PACK_HERB_EVENT", productId: "PROD_HERB", packagingName: "イベント", quantityPerPackage: 1, netWeightG: 80, unitWeightG: 80, packageUnit: "本", displayOrder: 2, isActive: true },
         { packagingId: "PACK_CHEESE_STANDARD", productId: "PROD_CHEESE", packagingName: "通常", quantityPerPackage: 3, netWeightG: 130, unitWeightG: 43.3, packageUnit: "パック", displayOrder: 1, isActive: true },
         { packagingId: "PACK_CHORIZO_STANDARD", productId: "PROD_CHORIZO", packagingName: "通常", quantityPerPackage: 3, netWeightG: 130, unitWeightG: 43.3, packageUnit: "パック", displayOrder: 1, isActive: true },
-        { packagingId: "PACK_GIBIER_CENTER_STANDARD", productId: "PROD_GIBIER_CENTER", packagingName: "通常", quantityPerPackage: 1, netWeightG: 70, unitWeightG: 70, packageUnit: "本", displayOrder: 1, isActive: true },
+        { packagingId: "PACK_GIBIER_CENTER_STANDARD", productId: "PROD_GIBIER_CENTER", packagingName: "通常", quantityPerPackage: 1, netWeightG: 65, unitWeightG: 65, packageUnit: "本", displayOrder: 1, isActive: true },
         { packagingId: "PACK_TOGE_CHAya_STANDARD", productId: "PROD_TOGE_CHAya", packagingName: "通常", quantityPerPackage: 2, netWeightG: 70, unitWeightG: 35, packageUnit: "パック", displayOrder: 1, isActive: true }
       ].map((record) => ({ ...record, createdAt: now, updatedAt: now }));
     }
@@ -1923,6 +1929,10 @@
       saveScreenState("recordForm", ["home", "records", "new"], draft);
       setHeader("製造数入力", "既存レシピから記録", true, backHandler);
       app.innerHTML = `
+        <input id="recordIdentity" type="hidden" value="${escapeHtml(draft.recordIdentity || "")}">
+        <input id="recordCreatedAt" type="hidden" value="${escapeHtml(draft.recordCreatedAt || "")}">
+        <input id="recordReservedLot" type="hidden" value="${escapeHtml(draft.recordReservedLot || "")}">
+        <input id="recordSaveComplete" type="hidden" value="${escapeHtml(draft.recordSaveComplete || "")}">
         <input id="recordSavedRecipeId" type="hidden" value="${escapeHtml(draft.recordSavedRecipeId || "")}">
         <select id="recordCategory" hidden><option value="自社レシピ">自社レシピ</option><option value="委託製造">委託製造</option></select>
         <section class="section record-basic-info">
@@ -2463,7 +2473,7 @@
         showSavedRecipeList("削除しました");
       } catch (error) {
         const status = document.getElementById("savedRecipeStatus");
-        if (status) status.textContent = "削除に失敗しました";
+        if (status) status.textContent = "削除できませんでした";
       }
     }
 
@@ -2551,7 +2561,7 @@
 
     function bindManufacturingRecordForm(draft = {}) {
       const ids = [
-        "recordSavedRecipeId", "recordPrepDate", "recordDate", "recordCategory", "recordRecipe", "recordLot", "recordMemo",
+        "recordIdentity", "recordCreatedAt", "recordReservedLot", "recordSaveComplete", "recordSavedRecipeId", "recordPrepDate", "recordDate", "recordCategory", "recordRecipe", "recordLot", "recordMemo",
         "recordPackageCount", "recordHerbStandardPackageCount", "recordHerbEventPieceCount", "recordSmokedCount", "recordUnsmokedCount", "recordLossCount", "recordLeftoverWeight",
         "recordTogeAllocationEnabled", "recordTogeAllocationId", "recordTogeGeneratedId", "recordTogePieceCount"
       ];
@@ -2622,7 +2632,7 @@
           document.getElementById("recordSave").disabled = true;
           return;
         }
-        document.getElementById("recordSave").disabled = false;
+        document.getElementById("recordSave").disabled = isSavingRecord || Boolean(elements.recordSaveComplete.value);
         const selectedMasterIssue = isCombinedHerbOption(selectedOption)
           ? (packagingMasterIssue("PROD_HERB", "通常") || packagingMasterIssue("PROD_HERB", "イベント"))
           : packagingMasterIssueForOption(selectedOption);
@@ -2689,7 +2699,7 @@
       const recordSaveButton = document.getElementById("recordSave");
       let isSavingRecord = false;
       recordSaveButton.addEventListener("click", async () => {
-        if (isSavingRecord) return;
+        if (isSavingRecord || elements.recordSaveComplete.value) return;
         if (!elements.recordPrepDate.value || !elements.recordDate.value || !elements.recordRecipe.value) {
           showSaveToast("必須項目を入力してください。", "error");
           return;
@@ -2697,6 +2707,14 @@
         isSavingRecord = true;
         recordSaveButton.disabled = true;
         try {
+          if (!elements.recordIdentity.value) {
+            elements.recordIdentity.value = window.MeatProductionSync.uuid();
+            elements.recordCreatedAt.value = new Date().toISOString();
+          }
+          saveScreenState("recordForm", ["home", "records", "new"], recordFormDraftValues());
+          await initializeSupabaseMasterData();
+          const masterResult = await window.MeatProductionMasterData.refresh();
+          if (masterResult && masterResult.data) applySupabaseMasterData(masterResult.data);
           const record = collectManufacturingRecord(elements);
           const selectedOption = getRecordRecipeOption(elements.recordRecipe.value, elements.recordCategory.value);
           const herbMasterIssue = isCombinedHerbOption(selectedOption) ? (packagingMasterIssue("PROD_HERB", "通常") || packagingMasterIssue("PROD_HERB", "イベント")) : "";
@@ -2712,15 +2730,24 @@
             showSaveToast(allocationError, "error");
             return;
           }
-          record.id = window.MeatProductionSync ? window.MeatProductionSync.uuid() : createRecordId("manufacturing-record");
+          record.id = elements.recordIdentity.value;
           record.manufacturingRecordId = record.id;
-          record.createdAt = new Date().toISOString();
+          record.cloudRecordId = record.id;
+          record.createdAt = elements.recordCreatedAt.value;
           record.updatedAt = new Date().toISOString();
           record.savedAt = record.createdAt;
-          const syncResult = await saveManufacturingRecordOfflineFirst(record);
-          const records = loadManufacturingRecords();
+          const syncResult = await saveManufacturingRecordOfflineFirst(record, {
+            newRecord: true, masterResult, preserveLot: Boolean(elements.recordReservedLot.value),
+            onReserved: (lot) => {
+              elements.recordReservedLot.value = lot;
+              elements.recordLot.value = lot;
+              saveScreenState("recordForm", ["home", "records", "new"], recordFormDraftValues());
+            }
+          });
+          const records = loadManufacturingRecords({ includeDeleted: true }).filter((r) => manufacturingRecordId(r) !== record.id);
           records.unshift(record);
           saveManufacturingRecords(records);
+          elements.recordSaveComplete.value = "true";
           clearScreenState();
           goodNotesText.value = buildManufacturingRecordText(record);
           showSaveToast(syncResult.synced ? "保存しました。" : "端末に保存しました。クラウド同期は保留中です。");
@@ -2728,7 +2755,7 @@
           showSaveToast("保存できませんでした。もう一度お試しください。", "error");
         } finally {
           isSavingRecord = false;
-          recordSaveButton.disabled = false;
+          recordSaveButton.disabled = Boolean(elements.recordSaveComplete.value);
         }
       });
       render();
@@ -2789,7 +2816,7 @@
         unitWeightLabel: packagingSpec ? packagingSpec.unitWeightLabel : (packagingUnit === "本" ? "1本重量" : "1包装重量"),
         unitPiecesLabel: packagingSpec ? packagingSpec.unitPiecesLabel : "",
         recipeKind: option.recipe.kind,
-        lot: savedCalculation && savedCalculation.lot ? savedCalculation.lot : generateManufacturingLot(elements.recordDate.value, option.category, option.recipe, option.packagingKey),
+        lot: elements.recordReservedLot && elements.recordReservedLot.value ? elements.recordReservedLot.value : generateManufacturingLot(elements.recordDate.value, option.category, option.recipe, option.packagingKey),
         memo: elements.recordMemo.value.trim(),
         savedRecipeId: savedCalculation ? savedRecipeRecordId(savedCalculation) : "",
         savedCalculationId: savedCalculation ? savedRecipeRecordId(savedCalculation) : "",
@@ -2874,7 +2901,7 @@
       return lines.join("\n");
     }
 
-    function loadManufacturingRecords() {
+    function loadManufacturingRecords(options = {}) {
       const parsed = readStorageArray(MANUFACTURING_RECORDS_KEY, OLD_MANUFACTURING_RECORDS_KEY);
       const normalized = parsed.map((record, index) => {
         let item = record;
@@ -2907,7 +2934,7 @@
           ? Number(item.theoreticalFinishedWeight)
           : totalWeight;
         const hasGibierCounts = Object.prototype.hasOwnProperty.call(item, "smokedCount") || Object.prototype.hasOwnProperty.call(item, "unsmokedCount");
-        const gibierMetrics = calculateGibierProductionMetrics(smokedCount, unsmokedCount, theoreticalFinishedWeight);
+        const gibierMetrics = calculateGibierProductionMetrics(smokedCount, unsmokedCount, theoreticalFinishedWeight, inferSavedUnitWeight({ ...item, completedCount: smokedCount + unsmokedCount }, item.actualFinishedWeightG ?? item.finishedWeight) || 65);
         const storedFinishedWeight = item.actualFinishedWeightG != null ? item.actualFinishedWeightG : item.finishedWeight;
         const finishedWeight = storedFinishedWeight == null || storedFinishedWeight === ""
           ? (isGibierManufacturingRecord(item) && hasGibierCounts ? gibierMetrics.actualCompletedWeight : null)
@@ -2937,11 +2964,15 @@
         };
         return normalizedItem;
       });
-      return normalized.filter((record) => record.status !== "deleted");
+      return options.includeDeleted ? normalized : normalized.filter((record) => record.status !== "deleted");
     }
 
     function saveManufacturingRecords(records) {
-      localStorage.setItem(MANUFACTURING_RECORDS_KEY, JSON.stringify(records));
+      const byId = new Map(records.map((record) => [manufacturingRecordId(record), record]));
+      for (const deleted of readLegacyStorageArray(MANUFACTURING_RECORDS_KEY).filter((r) => r.status === "deleted")) {
+        byId.set(manufacturingRecordId(deleted), deleted);
+      }
+      localStorage.setItem(MANUFACTURING_RECORDS_KEY, JSON.stringify([...byId.values()]));
     }
 
     function manufacturingRecordId(record) {
@@ -2949,7 +2980,7 @@
     }
 
     function renderManufacturingRecordHistory(records, message = "", cacheNotice = "", diagnostics = null) {
-      const lastSync = window.MeatProductionSync ? "" : "";
+      const view = manufacturingHistoryView;
       app.innerHTML = `
         <section class="section">
           <h2>製造記録履歴</h2>
@@ -2959,7 +2990,7 @@
           ${window.MeatCrossDeviceSync ? `<div class="note">${escapeHtml(crossDeviceSyncStatusText())}</div>` : ""}
           <div class="record-actions" style="margin-bottom: 12px;">
             <button id="recordHistoryRefresh" class="secondary" type="button">最新データに更新</button>
-            <span id="recordHistorySyncTime" class="status">${lastSync}</span>
+            <span id="recordHistorySyncTime" class="status"></span>
           </div>
           ${records.length === 0 ? `<div class="empty">この端末には保存済みの製造履歴がありません。<br>インターネット接続後に同期してください。</div>` : `
             <div class="grid menu-grid">
@@ -2977,70 +3008,45 @@
       if (window.MeatProductionSync) {
         window.MeatProductionSync.getMeta("last_history_sync_at").then((value) => {
           const status = document.getElementById("recordHistorySyncTime");
-          if (status && value) status.textContent = `最終同期：${new Date(value).toLocaleString("ja-JP")}`;
+          if (view === manufacturingHistoryView && status && value) status.textContent = `最終同期：${new Date(value).toLocaleString("ja-JP")}`;
         }).catch(() => {});
       }
     }
 
-    async function refreshManufacturingHistory(showResult = false) {
-      const integrationResult = await runCrossDeviceIntegration().catch(() => null);
-      let localRecords = [];
-      const legacyCount = loadManufacturingRecords().length;
+    async function refreshManufacturingHistory(showResult = false, message = "") {
+      const view = ++manufacturingHistoryView;
+      app.innerHTML = `<div class="status">製造履歴を読み込み中...</div>`;
+      let syncResult = null;
+      let syncError = "";
+      let indexed = await loadIndexedManufacturingHistory().catch(() => []);
       try {
-        localRecords = await loadIndexedManufacturingHistory();
-        const pendingCount = window.MeatProductionSync ? await window.MeatProductionSync.pendingCount().catch(() => 0) : 0;
-        renderManufacturingRecordHistory(
-          combinedManufacturingHistory(localRecords),
-          "",
-          "",
-          { indexedCount: localRecords.length, legacyCount, pendingCount, cloudCount: null, syncError: "" }
-        );
+        if (navigator.onLine !== false) {
+          const integration = await runCrossDeviceIntegration();
+          // The integration owns its cache refresh. A failed refresh is not
+          // repeated here; independent request transports already abort at 15s.
+          syncResult = integration && integration.historyRefresh;
+          if (!syncResult) syncError = "クラウド同期を完了できませんでした。";
+        } else {
+          syncError = "オフライン";
+        }
       } catch (error) {
-        renderManufacturingRecordHistory(loadManufacturingRecords());
+        syncError = String(error && error.message ? error.message : error);
       }
-      try {
-        const syncResult = integrationResult && integrationResult.historyRefresh
-          ? integrationResult.historyRefresh
-          : await window.MeatProductionSync.refreshHistoryCache();
-        const refreshed = await loadIndexedManufacturingHistory();
-        const pendingCount = await window.MeatProductionSync.pendingCount().catch(() => 0);
-        renderManufacturingRecordHistory(
-          combinedManufacturingHistory(refreshed),
-          showResult ? "最新データへ更新しました。" : "",
-          "",
-          {
-            indexedCount: refreshed.length,
-            legacyCount,
-            pendingCount,
-            cloudCount: syncResult && Number.isFinite(Number(syncResult.updatedCount)) ? Number(syncResult.updatedCount) : null,
-            syncError: ""
-          }
-        );
-      } catch (error) {
-        const cached = localRecords.length ? localRecords : await loadIndexedManufacturingHistory().catch(() => []);
-        const combined = combinedManufacturingHistory(cached);
-        const pendingCount = window.MeatProductionSync ? await window.MeatProductionSync.pendingCount().catch(() => 0) : 0;
-        renderManufacturingRecordHistory(
-          combined,
-          "",
-          combined.length ? "オフラインのため、この端末に保存されている製造履歴を表示しています。" : "",
-          {
-            indexedCount: cached.length,
-            legacyCount,
-            pendingCount,
-            cloudCount: null,
-            syncError: String(error && error.message ? error.message : error)
-          }
-        );
-      }
+      indexed = await loadIndexedManufacturingHistory().catch(() => indexed);
+      const records = combinedManufacturingHistory(indexed);
+      const pendingCount = window.MeatProductionSync ? await window.MeatProductionSync.pendingCount().catch(() => 0) : 0;
+      if (view !== manufacturingHistoryView) return;
+      renderManufacturingRecordHistory(records,
+        message || (showResult && !syncError ? "最新データへ更新しました。" : ""),
+        syncError ? "端末に保存されている製造履歴を表示しています。" : "",
+        { indexedCount: indexed.length, legacyCount: loadManufacturingRecords().length,
+          pendingCount, cloudCount: syncResult ? syncResult.updatedCount : null, syncError });
     }
 
     function showManufacturingRecordHistory(backHandler = showManufacturingRecordTop, message = "") {
       saveScreenState("recordHistory", ["home", "records", "history"]);
       setHeader("製造記録履歴", "保存した記録", true, backHandler);
-      const records = loadManufacturingRecords();
-      renderManufacturingRecordHistory(records, message);
-      refreshManufacturingHistory(false);
+      return refreshManufacturingHistory(false, message);
     }
 
     function showManufacturingRecordDetail(recordId, editMode = false, message = "") {
@@ -3387,17 +3393,17 @@
     async function deleteManufacturingRecord(recordId) {
       if (!confirm("この製造記録を削除しますか？この操作は元に戻せません。")) return;
       try {
-        const records = loadManufacturingRecords();
+        const records = combinedManufacturingHistory(await loadIndexedManufacturingHistory());
         const index = records.findIndex((record) => manufacturingRecordId(record) === recordId);
         if (index < 0) throw new Error("製造記録が見つかりません。");
         const deletedRecord = { ...records[index], status: "deleted", updatedAt: new Date().toISOString() };
-        await saveManufacturingRecordOfflineFirst(deletedRecord);
+        const result = await saveManufacturingRecordOfflineFirst(deletedRecord);
         records[index] = deletedRecord;
         saveManufacturingRecords(records);
-        showManufacturingRecordHistory(showManufacturingRecordTop, "削除しました");
+        showManufacturingRecordHistory(showManufacturingRecordTop, result.synced ? "削除しました" : "端末では削除済みです。同期を待っています");
       } catch (error) {
         const status = document.getElementById("recordDetailStatus");
-        if (status) status.textContent = "削除に失敗しました";
+        if (status) status.textContent = "削除できませんでした";
       }
     }
 

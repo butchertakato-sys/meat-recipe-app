@@ -1,4 +1,4 @@
-/* Temporary read-only observation. Never calls application loaders, sync or repair. */
+/* Read-only tracing for the unresolved July 28 record identities. */
 (function (global) {
   "use strict";
   const LOTS = ["20260728-IT-GIBIER-01", "20260728-IT-GIBIER-02"];
@@ -108,28 +108,22 @@
     }
     if (!token) return { state: "unavailable", reason: "この端末の認証セッションがありません", tables: {} };
     const queries = {
-      manufacturing_records: { select: "*,product:products(display_name,internal_code),recipe:recipes(display_name,internal_code)" },
+      manufacturing_records: { select: "*,product:products(display_name,internal_code),recipe:recipes(display_name,internal_code)", manufacturing_date: `eq.${DAY}` },
       manufacturing_allocations: { select: "*" },
-      saved_recipe_calculations: { select: "*" },
-      packaging_master: { select: "*", internal_code: "eq.GIBIER_CENTER_STANDARD" },
-      // All versions preserve historical version IDs as well as current weight.
-      packaging_versions: { select: "*" },
-      // Usually forbidden by schema; report the read error instead of invoking reservation RPC.
-      manufacturing_lot_reservations: { select: "*", lot_base: "eq.20260728-IT-GIBIER" }
+      saved_recipe_calculations: { select: "*", prep_date: `eq.${DAY}` },
+
     };
     const tables = {};
-    await Promise.allSettled(Object.entries(queries).map(async ([table, query]) => {
+    for (const [table, query] of Object.entries(queries)) {
       const rows = [];
       let pages = 0;
       try {
         for (;;) {
           const params = new URLSearchParams({ ...query, business_id: `eq.${config.businessId}`, order: "id.asc", limit: "500", offset: String(rows.length) });
-          // packaging_versions has no business_id; use its related master to scope RLS read.
-          if (table === "packaging_versions") {
-            params.delete("business_id");
-            params.set("select", "*,packaging_master!inner(business_id,internal_code)");
-            params.set("packaging_master.business_id", `eq.${config.businessId}`);
-            params.set("packaging_master.internal_code", "eq.GIBIER_CENTER_STANDARD");
+          if (table === "manufacturing_allocations") {
+            const ids = (tables.manufacturing_records?.rows || []).filter(relevant).map(row => row.id);
+            if (!ids.length) break;
+            params.set("manufacturing_record_id", `in.(${ids.join(",")})`);
           }
           const controller = new AbortController();
           const timeout = setTimeout(() => controller.abort(), 15000);
@@ -150,7 +144,7 @@
         }
         tables[table] = { state: "read", pages, rows };
       } catch (error) { tables[table] = { state: "error", pages, rows, error: error.name === "AbortError" ? "timeout" : String(error.message) }; }
-    }));
+    }
     return { state: "observed", tables };
   }
 
@@ -181,10 +175,10 @@
     };
     const identity = row => fields(row, FIELDS.filter(key => !["memo", "recipeRows"].includes(key)));
     const layer = (rows, allocations) => ({ totalCount: rows.length,
-      identities: rows.map(identity),
+      identities: rows.filter(relevant).map(identity),
       targetRecords: rows.filter(row => relevant(row) || relevant(global.MeatHistoryRecovery.fromBundle({ record: row,
         allocations: allocations.filter(a => a.manufacturing_record_id === row.id) }))).map(row => observeRow(row, allocations.filter(a => a.manufacturing_record_id === row.id))),
-      deletedRecords: rows.filter(row => row.status === "deleted").map(row => observeRow(row, allocations.filter(a => a.manufacturing_record_id === row.id))) });
+      deletedRecords: rows.filter(row => relevant(row) && row.status === "deleted").map(row => observeRow(row, allocations.filter(a => a.manufacturing_record_id === row.id))) });
     const timelines = {};
     for (const [name, rows] of [["current", array(local[KEYS[0]])], ["archive", array(local[KEYS[1]])], ["indexed", indexed.records], ["cloud", cloudRows]]) {
       timelines[name] = LOTS.map(target => ({ lot: target, rows: rows.filter(row => lot(row) === target).map(row => fields(row, FIELDS)) }));
@@ -200,20 +194,19 @@
     }
     return {
       interpretation: "生値と純粋な統合結果の観測。missing（プロパティなし）、undefined、null、empty-string、数値0、正数を区別。時刻差は作成イベントの証明ではありません。allocation作成時刻は再同期でも再発行されます。",
-      localStorage: Object.fromEntries([KEYS[0], KEYS[1]].map(key => [key, { state: local[key].state, raw: local[key].raw, ...layer(array(local[key]), []) }])),
+      localStorage: Object.fromEntries([KEYS[0], KEYS[1]].map(key => [key, { state: local[key].state, ...layer(array(local[key]), []) }])),
       indexedDB: { state: indexed.state, error: indexed.error, ...layer(indexed.records, indexed.allocations),
-        targetAllocations: indexed.allocations.filter(a => targetIds.has(a.manufacturing_record_id)).map(a => ({ fields: fields(a, ALLOCATION_FIELDS), raw: a })), syncMeta: indexed.meta },
+        targetAllocations: indexed.allocations.filter(a => targetIds.has(a.manufacturing_record_id)).map(a => ({ fields: fields(a, ALLOCATION_FIELDS), raw: a })), syncMeta: indexed.meta.filter(row => /last_history_sync/.test(row.key || "")) },
       supabase: { state: cloud.state, reason: cloud.reason,
         tables: Object.fromEntries(Object.entries(cloud.tables).map(([name, result]) => [name, { state: result.state, pages: result.pages, error: result.error, totalCount: result.rows.length,
-          ...(name === "manufacturing_records" ? layer(result.rows, cloudAllocations) : { rows: name === "saved_recipe_calculations" ? result.rows.filter(savedRelevant) : name === "manufacturing_allocations" ? result.rows.filter(a => targetIds.has(a.manufacturing_record_id) || cloudRows.some(r => r.id === a.manufacturing_record_id && r.status === "deleted")) : result.rows }),
+          ...(name === "manufacturing_records" ? layer(result.rows, cloudAllocations) : { rows: name === "saved_recipe_calculations" ? result.rows.filter(savedRelevant) : name === "manufacturing_allocations" ? result.rows.filter(a => targetIds.has(a.manufacturing_record_id)) : result.rows }),
           ...(name === "saved_recipe_calculations" ? { observations: result.rows.filter(savedRelevant).map(row => ({ fields: fields(row, FIELDS), payloadFields: fields(row.payload || {}, FIELDS) })) } : {}) }])) },
       savedRecipes: Object.fromEntries([KEYS[2], KEYS[3]].map(key => [key, { state: local[key].state, rows: array(local[key]).filter(savedRelevant), observations: array(local[key]).filter(savedRelevant).map(row => fields(row, FIELDS)) }])),
-      mastersAndDevice: Object.fromEntries(KEYS.slice(4).map(key => [key, local[key]])), timelines,
+      timelines,
       canonicalObservation: {
         // Pure recovery only: do not call wrappers that normalize/persist masters or recipes.
-        fullLocalTombstones: global.MeatHistoryRecovery.mergeHistory(sources),
-        currentHistoryPathDeletedIndexedExcluded: global.MeatHistoryRecovery.mergeHistory(sources.filter(s => s.source !== "indexed" || s.record.status !== "deleted")),
-        fullLocalAndCloudTombstones: global.MeatHistoryRecovery.mergeHistory(withCloud)
+        fullLocalTombstones: global.MeatHistoryRecovery.mergeHistory(sources.filter(s => relevant(s.record))),
+        fullLocalAndCloudTombstones: global.MeatHistoryRecovery.mergeHistory(withCloud.filter(s => relevant(s.record)))
       }
     };
   }

@@ -1,9 +1,9 @@
 {
-  "showManufacturingRecordForm": "8760d3900e2b46f0c622de4bb6fb189a8601158a25bd46c812a0204d1776657c",
-  "bindManufacturingRecordForm": "8f6913f868ad73c23f80f7ecc0f2db58c5d0a96537112f4da62f40b166a181f3",
-  "collectManufacturingRecord": "b4705d3a844de9244a6ca6b3e5516fa81a21247a56e7ad066f0230abd032f600",
+  "showManufacturingRecordForm": "a04029a023b9e691697760807c9242f6419483b0fa142909b1eb0ee83b74707a",
+  "bindManufacturingRecordForm": "4df58517fd35933ff8ad9599a4ccdbd9eef59a53986092cd0b098aa11f1fc75b",
+  "collectManufacturingRecord": "8e6c015d9fb9f66f229815b841f0f5e736d38aea406d737a8d386f54a11bff10",
   "generateManufacturingLot": "3d88cb5707af6d26981692548617d7ab7ddb0b1a60b9e643f70017315ce81297",
-  "calculateGibierProductionMetrics": "94b0f676912ba67b13443e47104097268c59025648d0f51ea2b8a7a443c75816",
+  "calculateGibierProductionMetrics": "a24270435d35a289165c2d37b8dea2fa36db49c4042fd5eaa09c64f83b68a1c7",
   "buildManufacturingRecordText": "3a5324a700f244e44246e779ab0a22b6abf683ccd8595ea29f37348fcbdb4283",
   "manufacturingRecordReadHtml": "d54ac0faaa0a1e68e8706e6ac656b4dd6a13edd5cf915bb5210d9dbd33c86ef9",
   "manufacturingRecordEditHtml": "dc24e21ac3e588cea0d194ac049fa43539dfc22b5d917228ec9c04eb7c50f3ef",

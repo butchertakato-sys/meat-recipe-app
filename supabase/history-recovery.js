@@ -90,6 +90,7 @@
       const rank = (s) => failed(s.record) && s.source === "indexed" ? 4 : ({ archive: 0, local: 1, cloud: 2, indexed: 3 }[s.source] ?? 3);
       return rank(a) - rank(b) || time(b.record) - time(a.record) || a.index - b.index;
     });
+    const tombstone = candidates.find((s) => s.record.status === "deleted");
     const result = {};
     for (const { record } of candidates) for (const [key, value] of Object.entries(record)) {
       if (!present(value)) continue;
@@ -107,6 +108,7 @@
     }
     const sync = candidates.filter((s) => s.source === "indexed" || s.source === "cloud").sort((a, b) => time(b.record) - time(a.record))[0];
     if (sync) { result.syncStatus = sync.record.syncStatus; result.syncError = sync.record.syncError || ""; if (sync.record.status === "deleted") result.status = "deleted"; }
+    if (tombstone) result.status = "deleted";
     return result;
   }
 
@@ -151,11 +153,13 @@
 
   function mergeHistory(sources, savedRecipes = []) {
     const groups = [];
+    const identity = (r) => r.cloudRecordId || r.manufacturingRecordId || r.id;
     for (const source of sources) {
       const r = source.record;
       if (!r) continue;
-      const id = r.cloudRecordId || r.manufacturingRecordId || r.id;
-      let group = groups.find((g) => g.some((s) => (r.lot && s.record.lot === r.lot) || (id && [s.record.cloudRecordId, s.record.manufacturingRecordId, s.record.id].includes(id))));
+      const id = identity(r);
+      // LOT is not an identity: two manufacturing events can share a LOT.
+      let group = id && groups.find((g) => g.some((s) => identity(s.record) === id));
       if (!group) { group = []; groups.push(group); }
       group.push(source);
     }
