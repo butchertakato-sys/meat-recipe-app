@@ -190,7 +190,7 @@ const base={id:'old-record',lot:'20261008-JI-ARABIKI-01',recipeName:'あらび�
  await H.page.waitForFunction(()=>!crossDeviceIntegrationPromise);
  let release;const gate=new Promise(resolve=>{release=resolve;});let gets=0;
  await H.page.route('https://supabase.test/rest/v1/manufacturing_records**',async route=>{gets++;await gate;return mock(route);});
- const immediate=await H.page.evaluate(()=>{document.querySelector('[data-type="record-history"]').click();return {text:app.textContent.trim(),rows:app.querySelectorAll('[data-type="record-detail"]').length,renders:historyRenders.length};});
+ const immediate=await H.page.evaluate(()=>{startApplication();showManufacturingRecordTop();document.querySelector('[data-type="record-history"]').click();return {text:app.textContent.trim(),rows:app.querySelectorAll('[data-type="record-detail"]').length,renders:historyRenders.length};});
  assert.deepEqual(immediate,{text:'製造履歴を読み込み中...',rows:0,renders:0});
  await H.page.waitForTimeout(100);assert.equal(await H.page.evaluate(()=>historyRenders.length),0);assert.ok(gets>0);
  release();await H.page.waitForFunction(()=>historyRenders.length===1);
@@ -208,7 +208,7 @@ const base={id:'old-record',lot:'20261008-JI-ARABIKI-01',recipeName:'あらび�
  const offlineMark=requestLog.length;await H.page.evaluate(()=>showManufacturingRecordHistory());
  assert.equal(await H.page.evaluate(()=>historyRenders.length),1);assert.deepEqual(await H.page.evaluate(()=>historyRenders[0]),expected);assert.equal(requestLog.length,offlineMark);
  await H.page.evaluate(()=>{testOnline=true;historyRenders=[];});
- await H.page.route('https://supabase.test/**',route=>route.abort());await H.page.evaluate(()=>showManufacturingRecordHistory());
+ await H.page.route('https://supabase.test/**',route=>route.abort());await H.page.evaluate(()=>refreshManufacturingHistory(true));
  assert.equal(await H.page.evaluate(()=>historyRenders.length),1);assert.deepEqual(await H.page.evaluate(()=>historyRenders[0]),expected);await H.page.unroute('https://supabase.test/**');
  console.log('PASS history offline/network failure: exactly one local list, no stuck loading');
 
@@ -220,7 +220,7 @@ const base={id:'old-record',lot:'20261008-JI-ARABIKI-01',recipeName:'あらび�
    window.fetch=(url,options={})=>String(url).includes('/manufacturing_records?')
      ? new Promise((_,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('fixture hung GET','AbortError')),{once:true}))
      : originalFetch(url,options);
-   try {historyRenders=[];await showManufacturingRecordHistory();}
+   try {historyRenders=[];await refreshManufacturingHistory(true);}
    finally {window.fetch=originalFetch;window.setTimeout=originalTimeout;}
  });
  assert.equal(await H.page.evaluate(()=>historyRenders.length),1);assert.deepEqual(await H.page.evaluate(()=>historyRenders[0]),expected);
@@ -228,7 +228,7 @@ const base={id:'old-record',lot:'20261008-JI-ARABIKI-01',recipeName:'あらび�
 
  let releaseStale;const staleGate=new Promise(resolve=>{releaseStale=resolve;});
  await H.page.route('https://supabase.test/rest/v1/manufacturing_records**',async route=>{await staleGate;return mock(route);});
- await H.page.evaluate(()=>{historyRenders=[];window.staleHistory=showManufacturingRecordHistory();showHome();});
+ await H.page.evaluate(()=>{historyRenders=[];window.staleHistory=refreshManufacturingHistory(true);showHome();});
  const home=await H.page.evaluate(()=>app.innerHTML);releaseStale();await H.page.evaluate(()=>staleHistory);
  assert.equal(await H.page.evaluate(()=>historyRenders.length),0);assert.equal(await H.page.evaluate(()=>app.innerHTML),home);await H.page.unroute('https://supabase.test/rest/v1/manufacturing_records**');
  await H.page.evaluate(()=>showManufacturingAnalysis());

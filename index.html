@@ -1266,6 +1266,8 @@
     }
 
     let crossDeviceIntegrationPromise = null;
+    let startupManufacturingSync = null;
+    let manufacturingHistorySyncError = "";
 
     function crossDeviceSyncStatusText() {
       if (!window.MeatCrossDeviceSync) return "";
@@ -1307,13 +1309,12 @@
     }
 
     async function runCrossDeviceIntegration() {
-      if (!window.MeatCrossDeviceSync) {
-        await initializeManufacturingSync();
-        return { historyRefresh: await window.MeatProductionSync.refreshHistoryCache() };
-      }
       if (crossDeviceIntegrationPromise) return crossDeviceIntegrationPromise;
       crossDeviceIntegrationPromise = (async () => {
         await initializeManufacturingSync();
+        if (!window.MeatCrossDeviceSync) {
+          return { historyRefresh: await window.MeatProductionSync.refreshHistoryCache() };
+        }
         await initializeSupabaseMasterData();
         window.MeatCrossDeviceSync.initialize(window.MEAT_SUPABASE_CONFIG || {});
         const result = await window.MeatCrossDeviceSync.syncAll({
@@ -1331,7 +1332,15 @@
         const status = document.getElementById("crossDeviceSyncStatus");
         if (status) status.textContent = crossDeviceSyncStatusText();
         return result;
-      })().finally(() => {
+      })().then((result) => {
+        manufacturingHistorySyncError = !result.historyRefresh
+          ? "クラウド同期を完了できませんでした。"
+          : (result.state === "error" || result.state === "conflict" ? result.error || crossDeviceSyncStatusText() : "");
+        return result;
+      }, (error) => {
+        manufacturingHistorySyncError = String(error && error.message ? error.message : error);
+        throw error;
+      }).finally(() => {
         crossDeviceIntegrationPromise = null;
       });
       return crossDeviceIntegrationPromise;
@@ -1351,9 +1360,9 @@
     function startApplication() {
       if (applicationStarted) return;
       applicationStarted = true;
-      initializeManufacturingSync()
-        .then((result) => { refreshManufacturingSyncStatus(result.pendingCount); return initializeSupabaseMasterData(); })
-        .then(() => runCrossDeviceIntegration()).catch(() => {});
+      startupManufacturingSync = navigator.onLine === false
+        ? initializeManufacturingSync().catch(() => null)
+        : runCrossDeviceIntegration().catch(() => null);
       const state = loadScreenState();
       if (state) {
         showRestorePrompt(state);
@@ -3014,7 +3023,7 @@
       if (window.MeatProductionSync) {
         window.MeatProductionSync.getMeta("last_history_sync_at").then((value) => {
           const status = document.getElementById("recordHistorySyncTime");
-          if (view === manufacturingHistoryView && status && value) status.textContent = `最終同期：${new Date(value).toLocaleString("ja-JP")}`;
+          if (view === manufacturingHistoryView && status) status.textContent = value ? `最終同期：${new Date(value).toLocaleString("ja-JP")}` : "最終同期：未実施";
         }).catch(() => {});
       }
     }
@@ -3024,28 +3033,30 @@
       app.innerHTML = `<div class="status">製造履歴を読み込み中...</div>`;
       let syncResult = null;
       let syncError = "";
-      let indexed = await loadIndexedManufacturingHistory().catch(() => []);
       try {
-        if (navigator.onLine !== false) {
+        if (showResult && navigator.onLine !== false) {
           const integration = await runCrossDeviceIntegration();
-          // The integration owns its cache refresh. A failed refresh is not
-          // repeated here; independent request transports already abort at 15s.
           syncResult = integration && integration.historyRefresh;
-          if (!syncResult) syncError = "クラウド同期を完了できませんでした。";
         } else {
-          syncError = "オフライン";
+          // The retained startup promise also covers initialization before the
+          // first history visit. Later visits only read the local snapshot.
+          if (startupManufacturingSync) await startupManufacturingSync;
+        }
+        syncError = navigator.onLine === false ? "オフライン" : manufacturingHistorySyncError;
+        if (!syncError && window.MeatProductionSync && await window.MeatProductionSync.getMeta("last_history_sync_result") === "error") {
+          syncError = await window.MeatProductionSync.getMeta("last_history_sync_error") || "クラウド同期を完了できませんでした。";
         }
       } catch (error) {
         syncError = String(error && error.message ? error.message : error);
       }
-      indexed = await loadIndexedManufacturingHistory().catch(() => indexed);
+      const indexed = await loadIndexedManufacturingHistory().catch(() => [...manufacturingIndexedHistory.values()]);
       const records = combinedManufacturingHistory(indexed);
       const pendingCount = window.MeatProductionSync ? await window.MeatProductionSync.pendingCount().catch(() => 0) : 0;
       if (view !== manufacturingHistoryView) return;
       captureManufacturingDisplayWeights(indexed);
       renderManufacturingRecordHistory(records,
         message || (showResult && !syncError ? "最新データへ更新しました。" : ""),
-        syncError ? "端末に保存されている製造履歴を表示しています。" : "",
+        syncError ? "端末に保存されている製造履歴を表示しています。クラウドの最新データは確認できていません。" : "端末に保存されている製造履歴を表示しています。",
         { indexedCount: indexed.length, legacyCount: loadManufacturingRecords().length,
           pendingCount, cloudCount: syncResult ? syncResult.updatedCount : null, syncError });
     }
