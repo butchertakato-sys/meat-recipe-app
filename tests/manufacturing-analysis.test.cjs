@@ -22,3 +22,37 @@ test('analysis 10 real quantity regression fixtures',()=>{for(const [code,n]of [
 test('missing weights excluded as paired observations; zero retained',()=>{const g=aggregate([row(),row({finishedWeightG:null}),row({preparationWeightG:null}),row({finishedWeightG:0})])[0];assert.equal(g.yieldCount,2);assert.equal(g.yieldPercent,40);assert.equal(g.missingFinished,1);});
 test('period boundaries including leap year and January',()=>{assert.equal(c.manufacturingAnalysisPeriod('previous','2026-01-10').start,'2025-12-01');assert.equal(c.manufacturingAnalysisPeriod('month','2024-02-10').end,'2024-02-29');});
 test('source input is not mutated and units stay separate within product',()=>{const rows=[row(),row({quantities:[{kind:'ordinary',label:'',unit:'袋',value:2}]})];const before=JSON.stringify(rows);assert.equal(aggregate(rows)[0].quantities.length,2);c.filterManufacturingRecords(rows,{});assert.equal(JSON.stringify(rows),before);});
+
+test('STEP2 month and year boundaries use manufacturing date; no LOT merging',()=>{
+  const rows=[row({id:'a',date:'2025-12-31',prepDate:'2026-01-01',lot:'same'}),row({id:'b',date:'2026-01-01',lot:'same'}),row({id:'c',date:'2026-01-31',lot:'same'}),row({id:'d',date:'2026-02-01'})];
+  const months=c.manufacturingAnalysisMonths(rows);
+  assert.deepEqual(Array.from(months,m=>[m.month,m.count,m.products[0].quantities[0].value]),[['2025-12',1,10],['2026-01',2,20],['2026-02',1,10]]);
+});
+test('STEP2 monthly quantities preserve product/kind/unit and all dedicated allocations',()=>{
+  const rows=[row(),row({productId:'HERB',quantities:quantity({recipeCode:'HERB',herbStandardPackageCount:5,herbEventPieceCount:100,togeAllocationEnabled:true,togePieceCount:12})}),row({productId:'GIBIER',quantities:quantity({recipeKind:'gibier',smokedCount:20,unsmokedCount:30})}),row({quantities:quantity({recipeCode:'ARABIKI',packagingUnit:'本',completedCount:7})})];
+  const m=c.manufacturingAnalysisMonths(rows)[0];
+  assert.deepEqual(Array.from(m.products.find(g=>g.productId==='HERB').quantities,q=>[q.kind,q.unit,q.value]),[['standard','パック',5],['event','本',100],['toge','本',12]]);
+  assert.deepEqual(Array.from(m.products.find(g=>g.productId==='GIBIER').quantities,q=>[q.kind,q.value]),[['smoked',20],['unsmoked',30]]);
+  assert.deepEqual(Array.from(m.products.find(g=>g.productId==='ARABIKI').quantities,q=>[q.unit,q.value]),[['パック',10],['本',7]]);
+});
+test('STEP2 weighted yield, missing month gap, missing weights and genuine zero',()=>{
+  const rows=[row({date:'2026-01-01'}),row({date:'2026-01-31',preparationWeightG:3000,finishedWeightG:1500}),row({date:'2026-01-15',finishedWeightG:null}),row({date:'2026-03-01',finishedWeightG:0})];
+  const m=c.manufacturingAnalysisMonths(rows);
+  assert.ok(Math.abs(m[0].yieldPercent-57.5)<1e-9);assert.equal(m[0].yieldCount,2);assert.equal(m[0].missingFinished,1);
+  assert.equal(m[1].count,0);assert.equal(m[1].yieldPercent,null);assert.equal(m[2].yieldPercent,0);
+});
+test('STEP2 comparison shifts January/year, respects product and category, and excludes dates only for full-month comparison',()=>{
+  const rows=[row({date:'2026-01-31'}),row({date:'2025-12-01',finishedWeightG:500}),row({date:'2025-01-01',finishedWeightG:600}),row({date:'2026-01-20',productId:'OTHER'}),row({date:'2026-01-02',category:'委託製造'})];
+  const v=c.manufacturingAnalysisComparison(rows,'2026-01',{productId:'ARABIKI',category:'自社レシピ',start:'2026-01-31'});
+  assert.equal(v.current.count,1);assert.equal(v.previous.month,'2025-12');assert.equal(v.yearAgo.month,'2025-01');assert.equal(v.previous.yieldPercent,50);assert.equal(v.yearAgo.yieldPercent,60);
+  const empty=c.manufacturingAnalysisComparison(rows,'2030-01',{productId:'ARABIKI'});assert.equal(empty.current.count,0);assert.equal(empty.current.yieldPercent,null);
+});
+test('STEP2 empty and custom periods include explicit gaps; aggregations never mutate input or individual yields',()=>{
+  assert.equal(c.manufacturingAnalysisMonths([]).length,0);
+  assert.deepEqual(Array.from(c.manufacturingAnalysisMonths([],{start:'2026-01-01',end:'2026-03-31'}),m=>m.count),[0,0,0]);
+  const rows=[row({yieldPercent:123})];const before=JSON.stringify(rows);c.manufacturingAnalysisMonths(rows);c.manufacturingAnalysisSummary(rows);c.manufacturingAnalysisComparison(rows,'2026-10');assert.equal(JSON.stringify(rows),before);
+});
+test('STEP2 absent quantity in one packaging series is not converted to zero',()=>{
+  const rows=[row({quantities:[{kind:'ordinary',label:'',unit:'パック',value:null}]}),row({quantities:[{kind:'ordinary',label:'',unit:'本',value:2}]})];
+  const g=c.manufacturingAnalysisMonths(rows)[0].products[0];assert.equal(g.quantities[0].count,1);assert.equal(g.quantities[0].missing,1);assert.equal(g.quantities[1].count,1);
+});
