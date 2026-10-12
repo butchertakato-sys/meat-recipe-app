@@ -299,14 +299,14 @@ const base={id:'old-record',lot:'20261008-JI-ARABIKI-01',recipeName:'あらび�
  await W.page.evaluate(id=>showManufacturingRecordDetail(id),wh.id);assert.match(await W.page.locator('.packaging-standard').innerText(),/通常：180g／パック/);assert.match(await W.page.locator('.packaging-standard').innerText(),/イベント：35g／本/);
  await W.page.evaluate(()=>showManufacturingAnalysis());
  const list=W.page.locator('[aria-label="製造記録一覧"]');
- assert.deepEqual(await list.locator('th').allTextContents(),['日付','仕込み日','商品','LOT','仕込み重量','完成重量','製造数','マスタ重量','歩留まり','備考']);
+ assert.deepEqual(await list.locator('thead th').allTextContents(),['製造日','仕込み日','商品','LOT','仕込み重量','完成重量','製造数','保存時マスタ重量','歩留まり','備考']);
  for(const [r,n]of [[w65,65],[w70,70]]){
    const cells=await W.page.locator(`[data-analysis-id="${r.id}"] td`).allTextContents();assert.equal(cells[0],r.date.replaceAll('-','/'));assert.equal(cells[1],r.prepDate.replaceAll('-','/'));assert.equal(cells[7],n+'g／本');
  }
  assert.match(await W.page.locator(`[data-analysis-id="${wu.id}"] td`).nth(7).innerText(),/不明/);
  assert.match(await W.page.locator(`[data-analysis-id="${wi.id}"] td`).nth(7).innerText(),/推定/);
  assert.match(await W.page.locator(`[data-analysis-id="${wh.id}"] td`).nth(7).innerText(),/通常：180g／パック/);
- assert.deepEqual(await W.page.locator('[aria-label="商品別集計表"] th').allTextContents(),['商品名','製造回数','総仕込み重量','総完成重量','総製造数','平均歩留まり']);
+ assert.deepEqual(await W.page.locator('[aria-label="商品別集計表"] thead th').allTextContents(),['商品名','製造回数','総仕込み重量','総完成重量','総製造数','加重平均歩留まり','構成比']);
  await W.page.selectOption('#analysisProduct','PROD_GIBIER_CENTER');assert.equal(await W.page.locator('[data-analysis-id]').count(),4);
  await W.page.selectOption('#analysisPeriod','custom');await W.page.fill('#analysisStart','2026-08-05');await W.page.locator('#analysisStart').dispatchEvent('change');await W.page.fill('#analysisEnd','2026-08-05');await W.page.locator('#analysisEnd').dispatchEvent('change');assert.equal(await W.page.locator('[data-analysis-id]').count(),1,'filter uses manufacturing date, not prep date');
  await W.page.selectOption('#analysisPeriod','all');await W.page.selectOption('#analysisOrder','oldest');assert.equal(await W.page.locator('[data-analysis-id]').first().getAttribute('data-analysis-id'),w65.id);

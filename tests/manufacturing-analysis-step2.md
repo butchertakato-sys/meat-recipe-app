@@ -27,4 +27,18 @@
 数値表には月別対象件数と未設定件数を併記する。
 実機確認：iPad Safariのタッチスクロール、縦横回転、ホーム画面起動時の既存キャッシュ更新。
 
-最終検証結果：単体83件 PASS / FAIL 0。既存sync-integration、record-observation-integration、history-startup-integration、新規manufacturing-analysis-integrationの4本すべてPASS。`git diff --check`、JavaScript構文チェックもPASS。
+最終検証結果：単体86件 PASS / FAIL 0。既存sync-integration、record-observation-integration、history-startup-integration、新規manufacturing-analysis-integrationの4本すべてPASS。`git diff --check`、JavaScript構文チェックもPASS。
+
+
+## 案4レイアウト修正
+
+表示順を絞り込み → 製造記録一覧 → 商品別集計表 → 集計サマリー・月別グラフ・歩留まり推移・期間比較へ変更。
+商品別表に完成重量ベースの構成比（横棒＋%）と総計行を追加。
+構成比は既知の完成重量のみを対象に計算し、未設定と0を区別。分母0は算出不可。
+表示用の小数1桁の端数調整で100.0%に揃え、横棒には実際の完成重量比を使用。
+総計の数量は商品・数量区分・単位別の内訳参照とし、混在単位を合算しない。
+
+追加自動検証：DOM順と画面上の位置、必須表見出し、総計の回数・重量・加重歩留まり、
+構成比68/16/16%と59.0/20.5/20.5%、欠損・0・均等3商品での丸め、
+絞り込みと表・グラフの一致、仕込み日・保存時180gマスタ重量維持、iPad横スクロールと固定見出し。
+既存CSV出力は「製造記録 → CSV出力」に実装済み。CSV処理は変更していない。

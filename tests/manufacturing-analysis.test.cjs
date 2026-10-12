@@ -56,3 +56,19 @@ test('STEP2 absent quantity in one packaging series is not converted to zero',()
   const rows=[row({quantities:[{kind:'ordinary',label:'',unit:'パック',value:null}]}),row({quantities:[{kind:'ordinary',label:'',unit:'本',value:2}]})];
   const g=c.manufacturingAnalysisMonths(rows)[0].products[0];assert.equal(g.quantities[0].count,1);assert.equal(g.quantities[0].missing,1);assert.equal(g.quantities[1].count,1);
 });
+
+test('layout composition uses finished weight, including zero and excluding missing',()=>{
+  const groups=aggregate([row(),row({productId:'B',finishedWeightG:200}),row({productId:'ZERO',finishedWeightG:0}),row({productId:'MISSING',finishedWeightG:null})]);
+  const shares=c.manufacturingAnalysisWeightShares(groups);
+  assert.deepEqual(Array.from(shares,s=>s.percent),[80,20,0,null]);assert.equal(shares.reduce((sum,s)=>sum+(s.displayPercent||0),0),100);
+  assert.equal(groups[3].missingFinished,1);
+});
+test('layout percentage rounding totals 100 without changing source weights',()=>{
+  const groups=aggregate(['A','B','C'].map(productId=>row({productId,finishedWeightG:1})));
+  const before=JSON.stringify(groups),shares=c.manufacturingAnalysisWeightShares(groups);
+  assert.deepEqual(Array.from(shares,s=>s.displayPercent),[33.4,33.3,33.3]);assert.ok(shares.every(s=>Math.abs(s.percent-100/3)<1e-9));assert.equal(JSON.stringify(groups),before);
+});
+test('layout empty/missing/all-zero composition has no invented percentages',()=>{
+  assert.equal(c.manufacturingAnalysisWeightShares([]).length,0);
+  const groups=aggregate([row({finishedWeightG:0}),row({productId:'MISSING',finishedWeightG:null})]);assert.ok(c.manufacturingAnalysisWeightShares(groups).every(s=>s.percent===null));
+});

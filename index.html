@@ -641,6 +641,12 @@
     #manufacturingAnalysis .analysis-scroll table { min-width:360px; width:100%; }
     #manufacturingAnalysis svg { display:block; font-size:13px; }
     @media(min-width:1300px) { #manufacturingAnalysis .analysis-chart-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+    #manufacturingAnalysis .analysis-table-scroll { overflow:auto; max-width:100%; max-height:65vh; -webkit-overflow-scrolling:touch; }
+    #manufacturingAnalysis .analysis-table-scroll thead th { position:sticky; top:0; z-index:1; }
+    #manufacturingAnalysis .analysis-table-scroll tfoot th, #manufacturingAnalysis .analysis-table-scroll tfoot td { background:#f3f5f3; font-weight:bold; }
+    #manufacturingAnalysis .analysis-share { display:flex; align-items:center; gap:8px; white-space:nowrap; }
+    #manufacturingAnalysis .analysis-share-track { display:block; width:100px; height:12px; background:#e5e9e5; border-radius:4px; overflow:hidden; flex-shrink:0; }
+    #manufacturingAnalysis .analysis-share-track > span { display:block; height:100%; background:#527454; }
     #manufacturingAnalysis [hidden] { display: none; }
     #manufacturingAnalysis table { border-collapse: collapse; font-size: 15px; text-align: left; }
     #manufacturingAnalysis th, #manufacturingAnalysis td { padding: 12px; border-bottom: 1px solid #ddd; vertical-align: top; }
