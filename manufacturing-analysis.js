@@ -141,49 +141,6 @@ function manufacturingAnalysisComparison(records, month, filters = {}) {
   return { current: summarize(month), previous: summarize(manufacturingAnalysisMonthShift(month, -1)), yearAgo: summarize(manufacturingAnalysisMonthShift(month, -12)) };
 }
 
-function manufacturingAnalysisCharts(months) {
-  if (!months.length) return '<h2>月別製造数グラフ</h2><p>データなし</p><h2>月別歩留まり推移グラフ</h2><p>データなし</p>';
-  const quantitySeries = new Map(), yieldSeries = new Map();
-  const quantityKey = (g, q) => JSON.stringify([g.productId, q.kind, q.unit]);
-  for (const m of months) for (const g of m.products) {
-    yieldSeries.set(g.productId, g.productName);
-    for (const q of g.quantities) quantitySeries.set(quantityKey(g, q), `${g.productName} ${q.label}（${q.unit}）`);
-  }
-  const chart = (label, values, line, unit, observations) => {
-    const width = Math.max(560, months.length * 84 + 70), height = 260;
-    const max = Math.max(1, ...values.filter(v => v != null));
-    const x = i => 65 + i * (width - 100) / Math.max(1, months.length - 1);
-    const y = v => 205 - v / max * 175;
-    let marks = '';
-    values.forEach((v, i) => {
-      if (v == null) return;
-      if (line) {
-        if (i && values[i - 1] != null) marks += `<line x1="${x(i - 1)}" y1="${y(values[i - 1])}" x2="${x(i)}" y2="${y(v)}" stroke="#527454" stroke-width="3"/>`;
-        marks += `<circle cx="${x(i)}" cy="${y(v)}" r="4" fill="#527454"/>`;
-      } else marks += `<rect x="${x(i) - 18}" y="${y(v)}" width="36" height="${205 - y(v)}" fill="#527454"/>`;
-    });
-    const ticks = [0, .5, 1].map(t => `<text x="48" y="${y(max * t) + 5}" text-anchor="end">${(max * t).toLocaleString('ja-JP', { maximumFractionDigits: 1 })}</text><line x1="55" y1="${y(max * t)}" x2="${width - 20}" y2="${y(max * t)}" stroke="#ddd"/>`).join('');
-    return `<figure class="analysis-chart"><figcaption>${escapeHtml(label)}</figcaption><div class="analysis-scroll" tabindex="0" role="region" aria-label="${escapeHtml(label)}"><svg width="${width}" height="${height}" role="img" aria-label="${escapeHtml(label)}。月別数値は下の表に表示。"><text x="5" y="18">${escapeHtml(unit)}</text>${ticks}${marks}${months.map((m, i) => `<text x="${x(i)}" y="235" text-anchor="middle">${m.month}</text>`).join('')}</svg><table><caption>月別集計値</caption><thead><tr><th scope="col">製造年月</th><th scope="col">${line ? '加重平均歩留まり' : '製造数'}</th><th scope="col">対象件数</th></tr></thead><tbody>${months.map((m, i) => `<tr><th scope="row">${m.month}</th><td>${values[i] == null ? 'データなし／未設定' : values[i].toLocaleString('ja-JP', { maximumFractionDigits: 1 }) + escapeHtml(unit)}</td><td>${observations[i].valid}/${observations[i].count}件${observations[i].missing ? `（未設定 ${observations[i].missing}件）` : ''}</td></tr>`).join('')}</tbody></table></div></figure>`;
-  };
-  const quantities = [...quantitySeries].map(([key, label]) => {
-    const [, , unit] = JSON.parse(key);
-    const values = months.map(m => {
-      for (const g of m.products) for (const q of g.quantities) if (quantityKey(g, q) === key) return q.missing === q.count ? null : q.value;
-      return null;
-    });
-    const observations = months.map(m => {
-      const q = m.products.flatMap(g => g.quantities.filter(q => quantityKey(g, q) === key))[0];
-      return { valid: q ? q.count - q.missing : 0, count: q?.count || 0, missing: q?.missing || 0 };
-    });
-    return chart(label, values, false, unit, observations);
-  }).join('');
-  const yields = [...yieldSeries].map(([id, label]) => chart(label, months.map(m => m.products.find(g => g.productId === id)?.yieldPercent ?? null), true, '%', months.map(m => {
-    const g = m.products.find(g => g.productId === id);
-    return { valid: g?.yieldCount || 0, count: g?.count || 0 };
-  }))).join('');
-  return `<h2>月別製造数グラフ</h2><p class="note">商品・数量区分・単位別に表示。記録なし・全件未設定は欠損です。</p><div class="analysis-chart-grid">${quantities || '<p>データなし</p>'}</div><h2>月別歩留まり推移グラフ</h2><p class="note">完成重量と正の理論完成重量が揃う記録の加重平均。欠損月は線をつなぎません。</p><div class="analysis-chart-grid">${yields || '<p>データなし</p>'}</div>`;
-}
-
 function manufacturingAnalysisComparisonHtml(comparison) {
   const { current, previous, yearAgo } = comparison;
   const number = (v, unit, digits = 1) => v == null ? '未設定' : v.toLocaleString('ja-JP', { maximumFractionDigits: digits }) + escapeHtml(unit);
@@ -213,7 +170,7 @@ function manufacturingAnalysisComparisonHtml(comparison) {
 
 async function showManufacturingAnalysis() {
   setHeader('製造実績・分析', '端末の保存済み履歴', true, showManufacturingRecordTop);
-  app.innerHTML = '<section class="section" id="manufacturingAnalysis"><p role="status">履歴を読み込み中…</p></section>';
+  app.innerHTML = '<section id="manufacturingAnalysis"><p role="status">履歴を読み込み中…</p></section>';
   const host = document.getElementById('manufacturingAnalysis');
   let indexed = [...manufacturingIndexedHistory.values()];
   let notice = '';
@@ -227,16 +184,16 @@ async function showManufacturingAnalysis() {
   records.forEach(r => products.set(r.productId, r.productName));
   const categories = [...new Set([...recordRecipeOptions('自社レシピ'), ...recordRecipeOptions('委託製造')].map(o => o.category))];
   host.innerHTML = `
-    <h2>絞り込み</h2><p class="note">日付基準：製造日（既存履歴の date）。保存済み履歴を表示します。最新データの取得は既存の同期操作をご利用ください。</p>
+    <div class="analysis-card"><h2>絞り込み</h2>
     ${notice ? `<p class="note">${escapeHtml(notice)}</p>` : ''}
-    <div class="field-row">
+    <div class="analysis-filters">
       <label>対象期間<select id="analysisPeriod"><option value="all">すべて</option><option value="month">今月</option><option value="previous">前月</option><option value="year">今年</option><option value="custom">期間指定</option></select></label>
       <label>商品<select id="analysisProduct"><option value="">すべて</option>${[...products].map(([id, name]) => `<option value="${escapeHtml(id)}">${escapeHtml(name)}</option>`).join('')}</select></label>
       <label>製造区分<select id="analysisCategory"><option value="">すべて</option>${categories.map(c => `<option>${escapeHtml(c)}</option>`).join('')}</select></label>
       <label>日付順<select id="analysisOrder"><option value="newest">新しい順</option><option value="oldest">古い順</option></select></label>
     </div>
-    <div class="field-row" id="analysisDates" hidden><label>開始日<input id="analysisStart" type="date"></label><label>終了日<input id="analysisEnd" type="date"></label></div>
-    <p id="analysisStatus" role="status"></p><div id="analysisResults"></div><div id="analysisInsights"></div>`;
+    <div id="analysisDates" hidden><label>開始日<input id="analysisStart" type="date"></label><label>終了日<input id="analysisEnd" type="date"></label></div>
+    <p id="analysisStatus" role="status"></p></div><div id="analysisResults"></div><div id="analysisInsights" class="analysis-card"></div>`;
   const field = name => host.querySelector('#analysis' + name);
   const weight = (value, missing = 0) => `${value == null ? '－' : (value / 1000).toLocaleString('ja-JP', { maximumFractionDigits: 3 }) + ' kg'}${missing ? `（未設定 ${missing}件）` : ''}`;
   const percent = value => value == null ? '－' : value.toFixed(1) + '%';
@@ -269,21 +226,22 @@ async function showManufacturingAnalysis() {
     const totalRow = `<tr><th scope="row">総計</th><td>${summary.count}回</td><td>${weight(summary.count === summary.missingPreparation ? null : summary.preparationWeightG, summary.missingPreparation)}</td><td>${weight(summary.count === summary.missingFinished ? null : summary.finishedWeightG, summary.missingFinished)}</td><td>商品・数量区分・単位別の内訳を参照</td><td>${percent(summary.yieldPercent)}<br>対象 ${summary.yieldCount}/${summary.count}件</td><td>${summary.finishedWeightG > 0 ? '100.0%' : (summary.count === summary.missingFinished ? '未設定' : '算出不可')}</td></tr>`;
     if (key !== insightKey) {
       insightKey = key;
-      const months = manufacturingAnalysisMonths(selected, range);
       const month = (range.end || selected.map(r => r.date).sort().pop() || todayString()).slice(0, 7);
-      field('Insights').innerHTML = `<h2>集計サマリー</h2><div class="analysis-summary">
+      const disclosures = [...field('Insights').querySelectorAll('details[id]')].map(d => [d.id, d.open]);
+      field('Insights').innerHTML = `<details id="analysisSummaryDetails"><summary><h2>集計サマリー</h2></summary><div class="analysis-summary">
         <p>製造回数<strong>${summary.count}回</strong></p>
         <p>総仕込み重量<strong>${weight(summary.count === summary.missingPreparation ? null : summary.preparationWeightG, summary.missingPreparation)}</strong><small>対象 ${summary.count - summary.missingPreparation}/${summary.count}件</small></p>
         <p>総完成重量<strong>${weight(summary.count === summary.missingFinished ? null : summary.finishedWeightG, summary.missingFinished)}</strong><small>対象 ${summary.count - summary.missingFinished}/${summary.count}件</small></p>
         <p>加重平均歩留まり<strong>${percent(summary.yieldPercent)}</strong><small>対象 ${summary.yieldCount}/${summary.count}件</small></p></div>
         ${field('Product').value && grouped.length ? `<p>数量内訳：${quantities(grouped[0].quantities.map(q => ({ ...q, value: q.missing === q.count ? null : q.value })))}</p>` : ''}
-        ${manufacturingAnalysisCharts(months)}<h2>前月・前年同月比較</h2>
+        </details><details id="analysisComparisonDetails"><summary><h2>前月・前年同月比較</h2></summary>
         <p class="note">基準月：${month}（期間の最終月。すべての場合は該当記録の最新月）。比較は各月の1日〜末日全体を対象とし、期間指定の開始・終了日にかかわらず同じ商品・製造区分で比較します。</p>
-        ${field('Product').value ? manufacturingAnalysisComparisonHtml(manufacturingAnalysisComparison(records, month, { productId: field('Product').value, category: field('Category').value })) : '<p>比較する商品を選択してください。</p>'}`;
+        ${field('Product').value ? manufacturingAnalysisComparisonHtml(manufacturingAnalysisComparison(records, month, { productId: field('Product').value, category: field('Category').value })) : '<p>比較する商品を選択してください。</p>'}</details>`;
+      disclosures.forEach(([id, open]) => { host.querySelector('#' + id).open = open; });
     }
-    field('Results').innerHTML = `<h2>製造記録一覧</h2>${selected.length ? table(['製造日', '仕込み日', '商品', 'LOT', '仕込み重量', '完成重量', '製造数', '保存時マスタ重量', '歩留まり', '備考'], selected.map(r => `<tr data-analysis-id="${escapeHtml(r.id)}" tabindex="0" style="cursor:pointer"><td>${escapeHtml(r.date.replace(/-/g, '/') || '－')}</td><td>${escapeHtml(r.prepDate.replace(/-/g, '/') || '－')}</td><td><button type="button" class="secondary">${escapeHtml(r.productName)}</button></td><td>${escapeHtml(r.lot || '－')}</td><td>${weight(r.preparationWeightG)}</td><td>${weight(r.finishedWeightG)}</td><td>${quantities(r.quantities)}</td><td>${manufacturingSavedWeightHtml(r.savedWeights)}</td><td>${percent(r.yieldPercent)}</td><td style="white-space:pre-wrap">${escapeHtml(r.memo || '－')}</td></tr>`).join(''), 1200) : '<p class="empty">条件に一致する製造記録はありません。</p>'}
-      <h2>商品別集計表</h2><p class="note">仕込み重量＝既存歩留まりの分母（理論重量）。加重平均歩留まり＝完成重量と正の仕込み重量が揃った記録の総完成重量 ÷ 総仕込み重量 × 100。未設定値は合計から除外し、件数を併記します。構成比＝商品別の総完成重量 ÷ 同じ絞り込み条件の総完成重量 × 100。完成重量未設定は除外し、総完成重量0の場合は算出しません。表示は小数1桁で合計100%になるよう丸めを調整します。</p>
-      ${grouped.length ? table(['商品名', '製造回数', '総仕込み重量', '総完成重量', '総製造数', '加重平均歩留まり', '構成比'], grouped.map(g => `<tr data-analysis-product="${escapeHtml(g.productId)}"><th scope="row">${escapeHtml(g.productName)}</th><td>${g.count}回</td><td>${weight(g.count === g.missingPreparation ? null : g.preparationWeightG, g.missingPreparation)}</td><td>${weight(g.count === g.missingFinished ? null : g.finishedWeightG, g.missingFinished)}</td><td>${quantities(g.quantities.map(q => ({ ...q, value: q.missing === q.count ? null : q.value })))}</td><td>${percent(g.yieldPercent)}<br>対象 ${g.yieldCount}/${g.count}件</td><td>${shareHtml(g)}</td></tr>`).join(''), 1050, totalRow) : '<p class="empty">集計対象はありません。</p>'}`;
+    field('Results').innerHTML = `<section class="analysis-card analysis-records"><h2>製造記録一覧</h2><p class="analysis-scroll-hint">横にスクロールして全項目を確認できます。商品名は固定表示。</p>${selected.length ? table(['製造日', '仕込み日', '商品', 'LOT', '仕込み重量', '完成重量', '製造数', '保存時マスタ重量', '歩留まり', '備考'], selected.map(r => `<tr data-analysis-id="${escapeHtml(r.id)}" tabindex="0" style="cursor:pointer"><td>${escapeHtml(r.date.replace(/-/g, '/') || '－')}</td><td>${escapeHtml(r.prepDate.replace(/-/g, '/') || '－')}</td><td><button type="button" class="secondary">${escapeHtml(r.productName)}</button></td><td>${escapeHtml(r.lot || '－')}</td><td>${weight(r.preparationWeightG)}</td><td>${weight(r.finishedWeightG)}</td><td>${quantities(r.quantities)}</td><td>${manufacturingSavedWeightHtml(r.savedWeights)}</td><td>${percent(r.yieldPercent)}</td><td style="white-space:pre-wrap">${escapeHtml(r.memo || '－')}</td></tr>`).join(''), 1200) : '<p class="empty">条件に一致する製造記録はありません。</p>'}
+      </section><section class="analysis-card analysis-products"><h2>商品別集計表</h2><p class="analysis-scroll-hint">横にスクロールして数値を比較できます。商品名は固定表示。</p><details><summary>集計方法・未設定値について</summary><p class="note">仕込み重量＝既存歩留まりの分母（理論重量）。加重平均歩留まり＝完成重量と正の仕込み重量が揃った記録の総完成重量 ÷ 総仕込み重量 × 100。未設定値は合計から除外し、件数を併記します。構成比＝商品別の総完成重量 ÷ 同じ絞り込み条件の総完成重量 × 100。完成重量未設定は除外し、総完成重量0の場合は算出しません。表示は小数1桁で合計100%になるよう丸めを調整します。</p></details>
+      ${grouped.length ? table(['商品名', '製造回数', '総仕込み重量', '総完成重量', '総製造数', '加重平均歩留まり', '構成比'], grouped.map(g => `<tr data-analysis-product="${escapeHtml(g.productId)}"><th scope="row">${escapeHtml(g.productName)}</th><td>${g.count}回</td><td>${weight(g.count === g.missingPreparation ? null : g.preparationWeightG, g.missingPreparation)}</td><td>${weight(g.count === g.missingFinished ? null : g.finishedWeightG, g.missingFinished)}</td><td>${quantities(g.quantities.map(q => ({ ...q, value: q.missing === q.count ? null : q.value })))}</td><td>${percent(g.yieldPercent)}<br>対象 ${g.yieldCount}/${g.count}件</td><td>${shareHtml(g)}</td></tr>`).join(''), 950, totalRow) : '<p class="empty">集計対象はありません。</p>'}</section>`;
     field('Results').querySelectorAll('[data-analysis-id]').forEach(row => {
       const open = () => showManufacturingRecordDetail(row.dataset.analysisId);
       row.addEventListener('click', open);

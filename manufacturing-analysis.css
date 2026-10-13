@@ -1,0 +1,61 @@
+/* Scoped to the analysis view; :has restores shared layout when navigating away. */
+body:has(#manufacturingAnalysis) { background:#eef3f8; }
+main:has(#manufacturingAnalysis), .topbar:has(+ main #manufacturingAnalysis) { width:min(1440px,100%); }
+#manufacturingAnalysis { display:grid; gap:16px; }
+#manufacturingAnalysis [hidden] { display:none; }
+#manufacturingAnalysis .analysis-card { min-width:0; background:#fff; border:1px solid #dce4ed; border-radius:12px; padding:18px; box-shadow:0 2px 5px #213c5910; }
+#manufacturingAnalysis h2 { color:#183754; font-size:20px; margin:0 0 12px; }
+#manufacturingAnalysis .note { color:#52677b; font-size:13px; line-height:1.6; margin:8px 0; }
+#manufacturingAnalysis .analysis-filters { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+#manufacturingAnalysis label { min-width:0; font-size:13px; color:#324c65; margin:0; }
+#manufacturingAnalysis select, #manufacturingAnalysis input { width:100%; min-width:0; min-height:44px; padding:9px 10px; font-size:16px; border:1px solid #c8d5e2; border-radius:8px; margin-top:5px; background:#fff; }
+#manufacturingAnalysis #analysisDates:not([hidden]) { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:12px; }
+#manufacturingAnalysis #analysisStatus { margin:10px 0 0; color:#52677b; font-size:13px; }
+#manufacturingAnalysis #analysisResults { display:grid; gap:16px; min-width:0; }
+#manufacturingAnalysis .analysis-scroll, #manufacturingAnalysis .analysis-table-scroll { overflow:auto; max-width:100%; -webkit-overflow-scrolling:touch; border:1px solid #dce4ed; border-radius:8px; }
+#manufacturingAnalysis .analysis-table-scroll { max-height:52vh; }
+#manufacturingAnalysis table { width:100%; border-collapse:separate; border-spacing:0; font-size:15px; text-align:left; table-layout:fixed; font-variant-numeric:tabular-nums; }
+#manufacturingAnalysis th, #manufacturingAnalysis td { padding:12px 10px; border-bottom:1px solid #e3e9ef; vertical-align:middle; overflow-wrap:anywhere; }
+#manufacturingAnalysis thead th { background:#eaf1f9; color:#254867; font-size:13px; font-weight:700; }
+#manufacturingAnalysis .analysis-table-scroll thead th { position:sticky; top:0; z-index:2; }
+#manufacturingAnalysis tbody tr { --row-bg:#fff; }
+#manufacturingAnalysis tbody tr:nth-child(even) { --row-bg:#f8fafc; }
+#manufacturingAnalysis tbody td, #manufacturingAnalysis tbody th { background:var(--row-bg); }
+#manufacturingAnalysis .analysis-records td:nth-child(n+5):nth-child(-n+9), #manufacturingAnalysis .analysis-records th:nth-child(n+5):nth-child(-n+9), #manufacturingAnalysis .analysis-products td, #manufacturingAnalysis .analysis-products thead th:not(:first-child), #manufacturingAnalysis .analysis-scroll td { text-align:right; }
+#manufacturingAnalysis .analysis-records th:nth-child(3), #manufacturingAnalysis .analysis-records td:nth-child(3), #manufacturingAnalysis .analysis-products th:first-child { position:sticky; left:0; z-index:1; box-shadow:2px 0 4px #213c5910; }
+#manufacturingAnalysis .analysis-records thead th:nth-child(3), #manufacturingAnalysis .analysis-products thead th:first-child { z-index:3; }
+#manufacturingAnalysis tfoot td, #manufacturingAnalysis tfoot th { background:#eaf1f9; color:#183754; font-weight:700; }
+#manufacturingAnalysis .analysis-products th:first-child { width:150px; }
+#manufacturingAnalysis .analysis-products th:last-child { width:180px; }
+#manufacturingAnalysis .analysis-records th:nth-child(1), #manufacturingAnalysis .analysis-records th:nth-child(2) { width:100px; }
+#manufacturingAnalysis .analysis-records th:nth-child(3) { width:130px; }
+#manufacturingAnalysis .analysis-records th:nth-child(4) { width:170px; }
+#manufacturingAnalysis .analysis-records th:nth-child(9) { width:85px; }
+#manufacturingAnalysis button { color:#245b92; background:#edf4fc; border:1px solid #c8daee; min-height:44px; padding:8px 10px; border-radius:8px; font-size:15px; width:100%; }
+#manufacturingAnalysis tr[data-analysis-id]:hover { --row-bg:#edf4fc; }
+#manufacturingAnalysis tr[data-analysis-id]:focus { outline:2px solid #397ab9; outline-offset:-2px; }
+#manufacturingAnalysis .analysis-share { display:flex; justify-content:flex-end; align-items:center; gap:8px; white-space:nowrap; }
+#manufacturingAnalysis .analysis-share-track { display:block; width:90px; height:10px; background:#e5edf6; border-radius:4px; overflow:hidden; flex-shrink:0; }
+#manufacturingAnalysis .analysis-share-track > span { display:block; height:100%; background:#4c87c5; }
+#manufacturingAnalysis summary { cursor:pointer; color:#183754; min-height:44px; display:list-item; padding:10px 0; font-weight:700; }
+#manufacturingAnalysis summary h2 { display:inline; font-size:18px; }
+#manufacturingAnalysis .analysis-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+#manufacturingAnalysis .analysis-summary p { padding:12px; background:#f3f7fb; border-radius:8px; margin:0; }
+#manufacturingAnalysis .analysis-summary strong, #manufacturingAnalysis .analysis-summary small { display:block; margin-top:8px; overflow-wrap:anywhere; }
+#manufacturingAnalysis .analysis-scroll table { min-width:900px; }
+#manufacturingAnalysis .analysis-scroll th:first-child { width:170px; }
+#manufacturingAnalysis .analysis-scroll-hint { color:#536d86; font-size:12px; margin:0 0 8px; }
+@media(max-width:600px) {
+  main:has(#manufacturingAnalysis) { padding:12px 10px 24px; }
+  #manufacturingAnalysis { gap:12px; }
+  #manufacturingAnalysis .analysis-card { padding:12px; border-radius:10px; }
+  #manufacturingAnalysis .analysis-filters, #manufacturingAnalysis .analysis-summary { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+  #manufacturingAnalysis h2 { font-size:18px; }
+  #manufacturingAnalysis th, #manufacturingAnalysis td { padding:10px; }
+}
+#manufacturingAnalysis .analysis-records td:nth-child(9), #manufacturingAnalysis .analysis-products td:nth-child(6) { color:#254867; font-weight:700; }
+@media(min-width:1024px) { #manufacturingAnalysis .analysis-products .analysis-scroll-hint { display:none; } }
+@media(min-width:1300px) { #manufacturingAnalysis .analysis-records .analysis-scroll-hint { display:none; } }
+
+#manufacturingAnalysis details { margin:0; padding:0; border:0; border-radius:0; background:transparent; }
+#manufacturingAnalysis summary { font-size:14px; border:0; border-radius:0; background:transparent; }

@@ -24,7 +24,7 @@ async function mock(route){
  const req=route.request(),url=new URL(req.url()),table=url.pathname.split('/').pop(),method=req.method();
  if(url.hostname==='app.test') {
    let file=path.join(root,url.pathname==='/'?'index.html':url.pathname);
-   try {let body=fs.readFileSync(file);if(file.endsWith('offline-sync.js'))body=body.toString().replace('async function syncPending() {', 'async function syncPending() { (window.syncTrace ||= []).push("syncPending");').replace('async function pullHistoryFromCloud() {','async function pullHistoryFromCloud() { window.pullCalls = (window.pullCalls || 0) + 1;').replace('() => refreshHistoryCache().catch(() => {})','() => (window.onlineSyncPromise = refreshHistoryCache()).catch(() => {})').replace('() => pullHistoryFromCloud().catch(() => {})','() => (window.savePullPromise = pullHistoryFromCloud()).catch(() => {})');if(file.endsWith('index.html'))body=body.toString().replace('    initApp();','    // Controlled initialization in isolated integration tests.');return route.fulfill({body,contentType:file.endsWith('.js')?'application/javascript':'text/html'});}catch{ return route.abort(); }
+   try {let body=fs.readFileSync(file);if(file.endsWith('offline-sync.js'))body=body.toString().replace('async function syncPending() {', 'async function syncPending() { (window.syncTrace ||= []).push("syncPending");').replace('async function pullHistoryFromCloud() {','async function pullHistoryFromCloud() { window.pullCalls = (window.pullCalls || 0) + 1;').replace('() => refreshHistoryCache().catch(() => {})','() => (window.onlineSyncPromise = refreshHistoryCache()).catch(() => {})').replace('() => pullHistoryFromCloud().catch(() => {})','() => (window.savePullPromise = pullHistoryFromCloud()).catch(() => {})');if(file.endsWith('index.html'))body=body.toString().replace('    initApp();','    // Controlled initialization in isolated integration tests.');return route.fulfill({body,contentType:file.endsWith('.js')?'application/javascript':file.endsWith('.css')?'text/css':'text/html'});}catch{ return route.abort(); }
  }
  if(url.hostname!=='supabase.test') {if(url.hostname!=='cdn.jsdelivr.net')unexpected.push(req.url());return route.abort();}
  requestLog.push({table,method,body:method==='GET'?null:req.postDataJSON()});
@@ -130,6 +130,8 @@ const base={id:'old-record',lot:'20261008-JI-ARABIKI-01',recipeName:'あらび�
  results.push('10: offline boot displays saved history with no cloud traffic');
  // A real background integration completes while a finished list remains visible.
  await D.page.evaluate(()=>showManufacturingRecordHistory());
+ // The last-sync label hydrates asynchronously from IndexedDB after list render.
+ await D.page.waitForFunction(()=>document.querySelector('#recordHistorySyncTime')?.textContent.startsWith('最終同期：'));
  const listBefore=await D.page.evaluate(()=>({html:app.innerHTML,renders:historyRenders.length}));
  let backgroundRelease;const backgroundGate=new Promise(resolve=>{backgroundRelease=resolve;});
  await D.page.route('https://supabase.test/rest/v1/manufacturing_records**',async route=>{await backgroundGate;return mock(route);});
@@ -137,6 +139,7 @@ const base={id:'old-record',lot:'20261008-JI-ARABIKI-01',recipeName:'あらび�
  assert.equal(await D.page.evaluate(()=>app.innerHTML),listBefore.html);assert.equal(await D.page.evaluate(()=>historyRenders.length),listBefore.renders);
  await D.page.unroute('https://supabase.test/rest/v1/manufacturing_records**');results.push('D: actual background integration completion leaves displayed list untouched');
  await D.page.evaluate(()=>showManufacturingRecordHistory());const steadyMark=requestLog.length;const startsBefore=await D.page.evaluate(()=>integrationStarts);
+ await D.page.waitForFunction(()=>document.querySelector('#recordHistorySyncTime')?.textContent.startsWith('最終同期：'));
  const stableHtml=await D.page.locator('#app').innerHTML();await D.page.clock.install();await D.page.clock.fastForward(2*60*60*1000);
  await D.page.evaluate(()=>{Object.defineProperty(document,'visibilityState',{configurable:true,value:'hidden'});document.dispatchEvent(new Event('visibilitychange'));Object.defineProperty(document,'visibilityState',{configurable:true,value:'visible'});document.dispatchEvent(new Event('visibilitychange'));window.dispatchEvent(new Event('pageshow'));startApplication();});
  assert.equal(await D.page.evaluate(()=>integrationStarts),startsBefore);assert.deepEqual(await D.page.evaluate(()=>intervalStarts),[]);assert.equal(requestLog.length,steadyMark);assert.equal(await D.page.locator('#app').innerHTML(),stableHtml);

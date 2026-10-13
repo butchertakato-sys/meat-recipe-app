@@ -27,7 +27,7 @@ async function mock(route){
    try {
      let body=fs.readFileSync(file);
      if(file.endsWith('index.html'))body=body.toString().replace('    initApp();','    // Controlled initialization in isolated integration tests.');
-     return route.fulfill({body,contentType:file.endsWith('.js')?'application/javascript':'text/html'});
+     return route.fulfill({body,contentType:file.endsWith('.js')?'application/javascript':file.endsWith('.css')?'text/css':'text/html'});
    } catch { return route.abort(); }
  }
  if(url.hostname!=='supabase.test') {if(url.hostname!=='cdn.jsdelivr.net')unexpected.push(req.url());return route.abort();}

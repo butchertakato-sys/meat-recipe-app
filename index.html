@@ -630,30 +630,7 @@
   <script src="manufacturing-record-display.js"></script>
   <script src="manufacturing-analysis.js"></script>
   <script src="supabase/record-observation.js"></script>
-  <style>
-    #manufacturingAnalysis .analysis-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; }
-    #manufacturingAnalysis .analysis-summary p { padding:12px; background:#f3f5f3; border-radius:8px; margin:0; }
-    #manufacturingAnalysis .analysis-summary strong, #manufacturingAnalysis .analysis-summary small { display:block; margin-top:8px; overflow-wrap:anywhere; }
-    #manufacturingAnalysis .analysis-chart-grid { display:grid; grid-template-columns:minmax(0,1fr); gap:16px; }
-    #manufacturingAnalysis .analysis-chart { margin:0; min-width:0; border:1px solid #ddd; border-radius:8px; padding:12px; }
-    #manufacturingAnalysis .analysis-chart figcaption { font-weight:bold; margin-bottom:12px; overflow-wrap:anywhere; }
-    #manufacturingAnalysis .analysis-scroll { overflow-x:auto; max-width:100%; }
-    #manufacturingAnalysis .analysis-scroll table { min-width:360px; width:100%; }
-    #manufacturingAnalysis svg { display:block; font-size:13px; }
-    @media(min-width:1300px) { #manufacturingAnalysis .analysis-chart-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
-    #manufacturingAnalysis .analysis-table-scroll { overflow:auto; max-width:100%; max-height:65vh; -webkit-overflow-scrolling:touch; }
-    #manufacturingAnalysis .analysis-table-scroll thead th { position:sticky; top:0; z-index:1; }
-    #manufacturingAnalysis .analysis-table-scroll tfoot th, #manufacturingAnalysis .analysis-table-scroll tfoot td { background:#f3f5f3; font-weight:bold; }
-    #manufacturingAnalysis .analysis-share { display:flex; align-items:center; gap:8px; white-space:nowrap; }
-    #manufacturingAnalysis .analysis-share-track { display:block; width:100px; height:12px; background:#e5e9e5; border-radius:4px; overflow:hidden; flex-shrink:0; }
-    #manufacturingAnalysis .analysis-share-track > span { display:block; height:100%; background:#527454; }
-    #manufacturingAnalysis [hidden] { display: none; }
-    #manufacturingAnalysis table { border-collapse: collapse; font-size: 15px; text-align: left; }
-    #manufacturingAnalysis th, #manufacturingAnalysis td { padding: 12px; border-bottom: 1px solid #ddd; vertical-align: top; }
-    #manufacturingAnalysis th { background: #f3f5f3; white-space: nowrap; }
-    #manufacturingAnalysis tr[data-analysis-id]:hover { background: #f3f5f3; }
-    #manufacturingAnalysis tr[data-analysis-id]:focus { outline: 2px solid #527454; outline-offset: -2px; }
-  </style>
+  <link rel="stylesheet" href="manufacturing-analysis.css">
   <script src="supabase/cross-device-sync.js"></script>
   <script>
     /*
